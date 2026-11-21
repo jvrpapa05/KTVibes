@@ -80,7 +80,8 @@ $('dock-queue').onclick=()=>$('queue').scrollIntoView({behavior:REDUCED.matches?
 // Reactions float up on this phone and on the TV. Quick taps add up into one "×3" note.
 function reactWith(button){  // karaoke-server: a function, so your own emoji buttons behave the same
  const emoji=button.dataset.emoji;send({action:'react',value:emoji});haptic(6);
- const box=button.getBoundingClientRect(),count=REDUCED.matches?1:5;
+ // karaoke-server: one floating emoji per tap (was 5), the same as the TV shows.
+ const box=button.getBoundingClientRect(),count=1;
  for(let i=0;i<count;i++){
   const float=el('span',emoji,'float');float.style.left=`${box.left+box.width/2-15}px`;float.style.top=`${box.top}px`;document.body.append(float);
   const drift=(Math.random()-.5)*90,rise=160+Math.random()*120,spin=(Math.random()-.5)*50;
