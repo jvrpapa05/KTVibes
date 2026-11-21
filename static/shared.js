@@ -4,16 +4,41 @@ export function el(tag, text, className) { const node=document.createElement(tag
 let build;
 function reloadIfUpdated(next){if(!next)return false;if(build===undefined)build=next;if(next===build)return false;location.reload();return true;}
 // onEvent gets any other server message, such as a cheer for the TV.
+// karaoke-server: phones pause hidden pages and drop their connection, so coming back to the remote briefly had
+// no socket. Now: reconnect the moment the page is visible again (and quickly, with back-off, otherwise); keep the
+// last status on screen and only say "Reconnecting…" if it takes over 3 s; hold anything tapped meanwhile (up to
+// 5 s old) and send it once connected. "Disconnected" is only for a real takeover (another TV, code 4001).
 export function connect(role, onState, onError, onOpen, onEvent) {
-  let socket;
+  let socket, retry = null, lostTimer = null, everOpen = false, attempts = 0, outbox = [];
+  const label = () => $('connection');
+  const live = () => socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING);
+  function showLost(){label().textContent='Reconnecting…';label().classList.remove('online');label().classList.add('lost');}
+  function waitThenShowLost(){if(!lostTimer&&!document.hidden)lostTimer=setTimeout(showLost,3000);}
   function open(){
+    clearTimeout(retry);retry=null;
+    if(live())return;
     socket=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws?role=${role}`);
-    socket.onopen=()=>{$('connection').textContent='Connected';$('connection').classList.add('online');$('connection').classList.remove('lost');onOpen?.();};
+    socket.onopen=()=>{
+      clearTimeout(lostTimer);lostTimer=null;attempts=0;
+      if(!everOpen)label().textContent='Connected';  // later reconnects keep the status the page already shows
+      everOpen=true;label().classList.add('online');label().classList.remove('lost');onOpen?.();
+      const pending=outbox.filter(m=>Date.now()-m.at<5000);outbox=[];for(const m of pending)socket.send(m.text);
+    };
     socket.onmessage=e=>{const data=JSON.parse(e.data);if(data.type==='state'){if(reloadIfUpdated(data.build))return;onState(data);}else if(data.type==='error')onError(data.message);else onEvent?.(data);};
-    socket.onclose=e=>{$('connection').textContent='Disconnected';$('connection').classList.remove('online');$('connection').classList.add('lost');if(e.code!==4001)setTimeout(open,1500);};
+    socket.onclose=e=>{
+      if(e.code===4001){label().textContent='Disconnected';label().classList.remove('online');label().classList.add('lost');return;}
+      waitThenShowLost();
+      if(!document.hidden)retry=setTimeout(open,Math.min(5000,250*2**attempts++));
+    };
   }
+  const wake=()=>{if(!document.hidden&&!live()){waitThenShowLost();open();}};
+  document.addEventListener('visibilitychange',wake);addEventListener('pageshow',wake);addEventListener('focus',wake);addEventListener('online',wake);
   open();
-  return message=>{if(socket.readyState===WebSocket.OPEN)socket.send(JSON.stringify(message));else onError('Reconnecting. Please try again.');};
+  return message=>{
+    if(socket.readyState===WebSocket.OPEN)return socket.send(JSON.stringify(message));
+    outbox.push({text:JSON.stringify(message),at:Date.now()});if(outbox.length>20)outbox.shift();
+    if(!document.hidden)open();
+  };
 }
 export async function api(path, options){
   const response=await fetch(path,options);let data;
