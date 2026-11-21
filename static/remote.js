@@ -1,5 +1,5 @@
 import {classicRemote,toastParts,emptyNote,secondsLeft} from './classic-remote.js';
-import {$,el,connect,api,clock,throttle,prepLabel,syncRanges,REDUCED,thumbnail,marquees} from './shared.js';
+import {$,el,connect,api,clock,throttle,prepLabel,syncRanges,REDUCED,thumbnail,marquees,prepPercent} from './shared.js';
 let state,classicUi;
 const SPRING='cubic-bezier(.38,1.21,.22,1)';
 const haptic=pattern=>{try{navigator.vibrate?.(pattern);}catch{}};
@@ -583,13 +583,7 @@ function placeFun(playing){
 // karaoke-server: one number for "how close is my song": the preparation steps (download, separate vocals, video,
 // lyrics) folded into a single 0-100% ring. Separating and syncing have no progress of their own: the server says
 // when they started and how long they should take, and we fill in between. It never goes backwards.
-const shownPct=new Map();
-function readyPercent(item){
- const now=Date.now()/1000+skew,span=(a,b,f)=>a+(b-a)*Math.max(0,Math.min(1,f||0));
- const timed=item.since&&item.expect?Math.min(.97,(now-item.since)/item.expect):0;
- const pct={queued:0,downloading:item.step==='video'?span(70,74,item.progress):span(0,4,item.progress),separating:span(4,70,timed),syncing:span(74,99,timed),ready:100}[item.status]??0;
- const best=Math.max(shownPct.get(item.key)||0,Math.floor(pct));shownPct.set(item.key,best);return best;
-}
+function readyPercent(item){return prepPercent(item,skew);}  // shared with the TV
 function readyText(item){return item.status==='error'?'Couldn\u2019t prepare':item.status==='ready'?'\u2713 Ready':`${readyPercent(item)}%`;}
 function showReady(row,item){
  const pct=item.status==='ready'?100:readyPercent(item);

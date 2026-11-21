@@ -46,3 +46,15 @@ export function marquee(node){
  else node.classList.remove('mq-on');
 }
 export function marquees(selectors){for(const node of document.querySelectorAll(selectors))if(node.getClientRects().length)marquee(node);}  // laid out (offsetParent is null under fixed headers)
+
+// karaoke-server: "how close is this song": the preparation steps (download, separate vocals, video, lyrics) as one
+// 0-100%. Separating and syncing have no progress of their own: the server sends when they started (since) and how
+// long they should take (expect), and we fill in between. Never goes backwards. skew = server clock minus ours.
+const prepShown=new Map();
+export function prepPercent(item,skew=0){
+ if(item.status==='ready')return 100;
+ const now=Date.now()/1000+skew,span=(a,b,f)=>a+(b-a)*Math.max(0,Math.min(1,f||0));
+ const timed=item.since&&item.expect?Math.min(.97,(now-item.since)/item.expect):0;
+ const pct={queued:0,downloading:item.step==='video'?span(70,74,item.progress):span(0,4,item.progress),separating:span(4,70,timed),syncing:span(74,99,timed)}[item.status]??0;
+ const best=Math.max(prepShown.get(item.key)||0,Math.floor(pct));prepShown.set(item.key,best);return best;
+}

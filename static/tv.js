@@ -1,4 +1,4 @@
-import {$,el,connect,api,clock,throttle,prepLabel,syncRanges,REDUCED,thumbnail,newSongs,marquees} from './shared.js';
+import {$,el,connect,api,clock,throttle,prepLabel,syncRanges,REDUCED,thumbnail,newSongs,marquees,prepPercent} from './shared.js';
 const music=$('instrumental'),voice=$('vocals'),video=$('backdrop');
 video.muted=true;
 let breather=0,guide,state,lyrics=[],firstLine=-1,stemGain=1,currentKey=null,context,musicGain,voiceGain,shifter,enabled=false,activeLine=-1,starting=false,generation=0,lastReport=0,seekTo=null,serverSkew=0,buffering=false,videoStarting=false,lyricsPositioned=false,lastSeek=0,shownPair='',fitKey='';
@@ -62,9 +62,9 @@ function render(next){
  const queued=state.upcoming.filter(i=>i.status!=='error');
  // karaoke-server: rebuild only when what it shows changes (a rebuild restarts the scrolling of long titles),
  // and start scrolling the new rows straight away.
- const deck=JSON.stringify([queued.length,...queued.slice(0,3).map(i=>[i.singer,i.title,i.artist,i.status==='ready'?'':prepLabel(i).text])]);
+ const deck=JSON.stringify([queued.length,...queued.slice(0,3).map(i=>[i.singer,i.title,i.artist,i.status==='ready'?'':'prep'])]);  // the % updates in place (deckPercents)
  if(deck!==deckShown){deckShown=deck;
- $('on-deck').replaceChildren(...queued.slice(0,3).map(i=>{const row=el('li');row.append(...(i.singer?[el('em',`${i.singer}: `,'deck-singer')]:[]),el('b',i.title),el('span',` ${i.artist}`),...(i.status==='ready'?[]:[el('small',` ${prepLabel(i).text}`)]));return row;}));
+ $('on-deck').replaceChildren(...queued.slice(0,3).map(i=>{const row=el('li');row.append(...(i.singer?[el('em',`${i.singer}: `,'deck-singer')]:[]),el('b',i.title),el('span',` ${i.artist}`),...(i.status==='ready'?[]:[(()=>{const pct=el('small',` ${prepPercent(i,serverSkew)}%`,'deck-pct');pct.dataset.key=i.key;return pct;})()]));return row;}));
  if(queued.length>3)$('on-deck').append(el('li',`+${queued.length-3} more`,'more'));
  if(!queued.length)$('on-deck').append(el('li','Nothing queued','more'));
  marquees('#on-deck li:not(.more)');}
@@ -477,9 +477,10 @@ function showPrep(queued){
  const item=state.current?null:queued.find(i=>i.status!=='ready'&&i.status!=='queued')||queued.find(i=>i.status==='queued');
  $('idle-prep').hidden=!item;$('idle-hero').hidden=!!item;
  if(!item)return;
- const {percent,text}=prepLabel(item);  // no percent while yt-dlp is still extracting
- $('idle-prep-step').textContent=text;$('idle-prep-title').textContent=item.title;
- const bar=$('idle-prep-bar');bar.parentElement.classList.toggle('busy',percent==null);bar.parentElement.style.setProperty('--p',percent==null?0:percent/100);
+ // karaoke-server: one percentage instead of the step name (same figure as the phone's queue)
+ const percent=prepPercent(item,serverSkew);
+ $('idle-prep-step').textContent=`Getting ready · ${percent}%`;$('idle-prep-title').textContent=item.title;
+ const bar=$('idle-prep-bar');bar.parentElement.classList.remove('busy');bar.parentElement.style.setProperty('--p',percent/100);
 }
 // karaoke-server: no "Open remote" on the TV; the remote is each person's phone.
 
@@ -529,3 +530,8 @@ function hideFun(id){for(const node of document.querySelectorAll('.shout,.polaro
 // karaoke-server: long titles scroll: the now-playing title/artist at the top and the Up next list.
 const TV_MARQUEES='#song-title,#song-artist,#on-deck li:not(.more)';
 setInterval(()=>marquees(TV_MARQUEES),1500);addEventListener('resize',()=>marquees(TV_MARQUEES));
+
+// karaoke-server: tick the preparation percentages once a second (Up next rows in place, and the idle headline).
+setInterval(()=>{if(!state)return;
+ for(const small of document.querySelectorAll('#on-deck .deck-pct')){const item=state.upcoming.find(i=>i.key===small.dataset.key);if(item)small.textContent=` ${prepPercent(item,serverSkew)}%`;}
+ showPrep(state.upcoming.filter(i=>i.status!=='error'));},1000);
