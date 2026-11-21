@@ -582,6 +582,10 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         got = [(r["parsed"]["artist"], r["parsed"]["title"]) for r in results]
         self.assertEqual(got[:4], [("Taylor Swift", "Shake It Off"), ("XXXTENTACION", "Moonlight"), ("Hozier", "Take Me to Church"), ("Survivor", "Eye of the Tiger")])
         self.assertEqual(got[4], ("Adele", "Hello"))   # Lionel Richie's "Hello" isn't named in this title: unchanged
+        # Filipino uploads often read "Song - Artist"; YouTube's majority must not overrule LRCLIB's records
+        opm = [res("Kung Kailangan Mo Ako - Rey Valera (Official Lyric Video)", "Vicor Music", "Kung Kailangan Mo Ako", "Rey Valera") for _ in range(3)]
+        names_from_records(opm, [{"artistName": "Rey Valera", "trackName": "Kung Kailangan Mo Ako"}])
+        self.assertEqual((opm[0]["parsed"]["artist"], opm[0]["parsed"]["title"]), ("Rey Valera", "Kung Kailangan Mo Ako"))
 
     def test_singer_names_are_unique_per_phone_until_idle(self):
         state = State()

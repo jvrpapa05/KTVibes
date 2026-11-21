@@ -157,9 +157,11 @@ def names_from_records(results: list[dict], records: list[dict]) -> None:
     for track, artists in votes.items():
         for artist, spellings in artists.items():
             pairs[(artist, track)] += sum(spellings.values())
+    # Only a pair LRCLIB itself has both ways round is in doubt: Filipino uploads often read "Song - Artist", so
+    # YouTube's majority alone must not throw out a record ("Kung Kailangan Mo Ako - Rey Valera").
     for track in list(votes):
         for artist in list(votes[track]):
-            if pairs[(track, artist)] > pairs[(artist, track)]:
+            if artist in votes and track in votes[artist] and pairs[(track, artist)] > pairs[(artist, track)]:
                 del votes[track][artist]
         if not votes[track]:
             del votes[track]
