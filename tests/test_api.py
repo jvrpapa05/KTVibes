@@ -1,4 +1,5 @@
 """HTTP/WebSocket contract checks, runnable once uv sync installs dependencies."""
+import json
 import asyncio
 import importlib.util
 from pathlib import Path
@@ -226,8 +227,9 @@ class APITests(unittest.TestCase):
         ready = Path(self.temp.name) / 'ccccccccccc'
         ready.mkdir()
         (ready / 'meta.json').write_text('{"artist": "LANY", "title": "Soft"}', encoding='utf-8')
-        for name in ('no_vocals.wav', 'vocals.wav', 'timed.json'):
+        for name in ('no_vocals.wav', 'vocals.wav'):
             (ready / name).touch()
+        (ready / 'timed.json').write_text('{"lines": [{"t": 10, "text": "a"}]}', encoding='utf-8')
         song = lambda i, d, title='Soft': {'id': i, 'title': f'LANY - {title}', 'channel': 'LANY', 'duration': d, 'kind': 'official',
                                            'parsed': {'artist': 'LANY', 'title': title}}
         results = [song('aaaaaaaaaaa', 178), song('bbbbbbbbbbb', 260), song('ccccccccccc', 999, 'Soft (Live)')]
@@ -239,6 +241,23 @@ class APITests(unittest.TestCase):
         # and comes first: our library matches the search (it starts at once, its lyrics are proven)
         self.assertEqual([r['id'] for r in found], ['ccccccccccc', 'aaaaaaaaaaa'])
         self.assertTrue(found[0]['library'])
+
+    def test_library_songs_are_offered_only_when_their_lyrics_line_up(self):
+        # karaoke-server: same rule as search results; measured first-line error for prepared songs
+        def song(vid, duration, lyrics_duration=None, entry=None, lines=True):
+            folder = Path(self.temp.name) / vid
+            folder.mkdir()
+            meta = {'artist': 'A', 'title': 'T', 'duration': duration}
+            if lyrics_duration: meta['lyrics_duration'] = lyrics_duration
+            (folder / 'meta.json').write_text(json.dumps(meta), encoding='utf-8')
+            (folder / 'timed.json').write_text(json.dumps({'entry_error': entry, 'lines': [{'t': 9, 'text': 'x' if lines else ''}]}), encoding='utf-8')
+        song('aaaaaaaaaaa', 200, 201)                 # lengths match
+        song('bbbbbbbbbbb', 217, 200, entry=0.2)      # longer (an outro), but starts with the singer
+        song('ccccccccccc', 200, 209, entry=-7.5)     # "This Is Me": 7.5 s early
+        song('ddddddddddd', 200, None, entry=None)    # unknown: benefit of the doubt
+        song('eeeeeeeeeee', 200, 200, lines=False)    # no lyrics at all
+        self.assertEqual([self.main.lines_up(v) for v in ('aaaaaaaaaaa', 'bbbbbbbbbbb', 'ccccccccccc', 'ddddddddddd', 'eeeeeeeeeee')],
+                         [True, True, False, True, False])
 
     def test_search_pages(self):
         with patch.object(self.main.youtube, 'search', return_value=[]) as search, \

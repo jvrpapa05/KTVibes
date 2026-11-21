@@ -96,7 +96,10 @@ def timed_lyrics(folder: Path, raw: str, samples_path: Path, lines: list[dict], 
     lyrics.time_units(lines, energy)
     lines = lyrics.add_jyutping(guides.add_hangul(lyrics.add_korean_romanization(lyrics.add_pinyin(lyrics.add_romaji(lines)))))
     temporary = folder / "timed.tmp"
-    temporary.write_text(json.dumps({"key": key, "aligned": aligned, "lines": lines}, ensure_ascii=False), encoding="utf-8")
+    # karaoke-server: how far the first line is from the singer's first phrase; search only offers library songs
+    # whose lyrics line up (see main.lines_up)
+    entry = lyrics.entry_error(samples, rate, lines)
+    temporary.write_text(json.dumps({"key": key, "aligned": aligned, "entry_error": entry, "lines": lines}, ensure_ascii=False), encoding="utf-8")
     temporary.replace(folder / "timed.json")
     return lines
 

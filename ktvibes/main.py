@@ -136,7 +136,7 @@ async def search(q: str = Query(min_length=1, max_length=200), page: int = Query
     results = [{**result, "cached": result["id"] in cached} for result in results]
     # karaoke-server: only what can be sung: synced lyrics that match this video, or a prepared song that has them
     # (user, 2026-11-22: "Show a list that is indeed playable").
-    playable = [r for r in results if r.get("lyrics_match") or (r["cached"] and (CACHE / r["id"] / "timed.json").is_file())]
+    playable = [r for r in results if r.get("lyrics_match") or (r["cached"] and lines_up(r["id"]))]
     # karaoke-server: matching songs from our own library first (first page only)
     mine = [{**s, "cached": True} for s in library_matches(q)] if page == 0 else []
     playable = mine + [r for r in playable if r["id"] not in {s["id"] for s in mine}]
@@ -192,6 +192,24 @@ def prepared_songs() -> dict:
                                "source_title": meta.get("source_title") or ""}
     return songs
 
+def lines_up(video_id: str) -> bool:
+    """karaoke-server: a prepared song can be sung if it has timed lyrics that line up with it: the lyrics' recording
+    is as long as the video, or (when it isn't, or isn't known) the first line was measured within 3 s of the
+    singer's first phrase. Unknown on both counts: given the benefit of the doubt."""
+    folder = CACHE / video_id
+    try:
+        timed = json.loads((folder / "timed.json").read_text(encoding="utf-8"))
+        meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not any(line.get("text", "").strip() for line in timed.get("lines", [])):
+        return False
+    length = meta.get("lyrics_duration")
+    if length and abs(float(meta.get("duration") or 0) - float(length)) <= youtube.LYRICS_TOLERANCE:
+        return True
+    entry = timed.get("entry_error")
+    return entry is None or abs(entry) <= 3  # the detector is good to about ±1 s
+
 def library_matches(q: str, limit: int = 3) -> list[dict]:
     """karaoke-server: prepared songs with timed lyrics that match every word of the search (a word may be the start
     of one: "Pahintulo"), as search results. They start at once and their lyrics are proven, so they come first;
@@ -201,7 +219,7 @@ def library_matches(q: str, limit: int = 3) -> list[dict]:
         return []
     found = []
     for song in prepared_songs().values():
-        if not (CACHE / song["id"] / "timed.json").is_file():
+        if not lines_up(song["id"]):
             continue
         own = re.findall(r"\w+", f"{song['artist']} {song['title']}".casefold())
         text = own + re.findall(r"\w+", song["source_title"].casefold())

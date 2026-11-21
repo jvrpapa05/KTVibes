@@ -440,6 +440,24 @@ def span(candidate: dict) -> tuple[float, float] | None:
     stamps = [int(m) * 60 + float(s) for m, s in re.findall(r"\[(\d+):(\d+(?:\.\d+)?)\]", candidate.get("syncedLyrics") or "")]
     return (min(stamps), max(stamps)) if stamps else None
 
+def entry_error(samples, rate: int, lines: list[dict], hop: float = 0.1) -> float | None:
+    """karaoke-server: seconds between the first line on screen and the singer's first sustained phrase (1.5 s, mostly
+    voiced) in the vocal stem; None when there's no clear phrase. Within ~2 s the lyrics start with the singer.
+    Validated on our library (2026-11-22): it caught every song whose lyrics were visibly early or late."""
+    import numpy as np
+    starts = [line["t"] for line in lines if line.get("text", "").strip()]
+    if not starts or not len(samples):
+        return None
+    mono = samples.mean(axis=1) if getattr(samples, "ndim", 1) > 1 else samples
+    n = max(int(rate * hop), 1)
+    frames = mono[: len(mono) // n * n].reshape(-1, n)
+    db = 20 * np.log10(np.sqrt(np.mean(frames ** 2, axis=1)) + 1e-9)
+    voice = db > np.percentile(db, 95) - 20
+    need = 15
+    runs = np.convolve(voice.astype(int), np.ones(need, int), "valid")
+    hits = np.nonzero(runs >= int(need * 0.8))[0]
+    return round(float(starts[0] - hits[0] * hop), 1) if len(hits) else None
+
 def real_lengths(records: list[dict]) -> None:
     """Set record["length"]: the real length of the recording its timing fits, or None if it can't fit any."""
     import statistics
