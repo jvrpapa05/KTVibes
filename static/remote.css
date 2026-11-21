@@ -285,3 +285,7 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
 .fun-idle{margin-top:16px;padding:16px;border-radius:22px;background:var(--panel);border:1px solid var(--line)}
 .fun-idle h2{font-size:15px;color:var(--muted);margin:0 0 12px;letter-spacing:.02em}
 .fun-idle .reactions{margin:0;border:0;padding:0}
+/* karaoke-server: one 0-100% ring per queued song; the number sits on the art */
+.thumb .pct{position:absolute;inset:4px;display:grid;place-items:center;border-radius:50%;background:#000a;font:700 12px/1 'Space Grotesk',sans-serif;color:#fff;font-variant-numeric:tabular-nums}
+.row .status{font-variant-numeric:tabular-nums}
+.row.is-ready .status{color:var(--lime)}

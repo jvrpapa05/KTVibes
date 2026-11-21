@@ -299,6 +299,22 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
             await state.control({'action': 'remove', 'key': a['key']})
         self.assertEqual(len(state.upcoming), 2)
 
+    def test_slow_steps_get_an_expected_length_that_learns(self):
+        # karaoke-server: separating/syncing report no progress, so the remote's ring is filled from these.
+        import ktvibes.worker as w
+        saved = dict(w.STEP_RATE)
+        try:
+            item = {}
+            w.expect_step(item, "separating", 200)
+            self.assertAlmostEqual(item["expect"], 0.36 * 200, places=1)
+            self.assertAlmostEqual(item["since"], time.time(), delta=2)
+            w.learn_step("separating", 30, 200)                      # this run went faster: 0.15 s per second
+            self.assertAlmostEqual(w.STEP_RATE["separating"], 0.6 * 0.36 + 0.4 * 0.15, places=4)
+            w.expect_step(item, "syncing", None)                     # unknown length: a typical song
+            self.assertGreaterEqual(item["expect"], 3)
+        finally:
+            w.STEP_RATE.update(saved)
+
     def test_singer_names_are_unique_per_phone_until_idle(self):
         state = State()
         self.assertEqual(state.claim_singer('  Anna ', 'phone-1'), 'Anna')

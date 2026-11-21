@@ -21,8 +21,9 @@ const send=message=>sendRaw(PROFILE_ACTIONS.has(message.action)&&singer()?{...me
 // What the settings sheet shows: the room while it's your song (or a song without a name), otherwise your own profile.
 function editingOwn(){const me=singer().toLowerCase(),on=(state?.current?.singer||'').toLowerCase();return !!me&&(!state?.current||(!!on&&on!==me));}
 function view(){if(!editingOwn())return state;const mine=state.profiles?.[singer().toLowerCase()];return {...state,...(mine||{})};}
+let skew=0;  // server clock minus ours, for the progress estimate
 function render(next){
- const before=state;state=next;state.received=Date.now()/1000;
+ const before=state;state=next;state.received=Date.now()/1000;if(state.server_time)skew=state.server_time-state.received;
  // The header pill reports the TV, since that decides whether anything can play.
  $('connection').textContent=!state.player_connected?'Open /tv on a device':state.player_audio?'Device ready':'Tap Enable sound on the device';$('connection').classList.toggle('warn',!state.player_audio);$('connection').classList.toggle('off',!state.player_connected);
  document.body.dataset.theme=state.theme||'default';showNow(!before);showControls(before);showQueue(before);showClassic();classicUi?.render(state);
@@ -204,8 +205,7 @@ function showQueue(before){
  }
  for(const [index,item] of state.upcoming.entries()){
   const row=$('queue').querySelector(`[data-key="${item.key}"]`);if(!row)continue;
-  row.querySelector('.status').textContent=statusText(item);row.querySelector('.status-ko').textContent=statusKo(item,index);row.querySelector('.prepbar')?.style.setProperty('--p',item.progress||0);
-  const ring=row.querySelector('.ring');if(ring){ring.style.setProperty('--p',item.progress||0);ring.classList.toggle('busy',!item.progress&&item.status!=='ready');}
+  row.querySelector('.status-ko').textContent=statusKo(item,index);showReady(row,item);
  }
 }
 // An empty queue invites the next song, with a button straight to the search box.
@@ -224,7 +224,8 @@ function queueRow(item,index,justReady){
  // The ring shows while the song prepares, and once more as it turns ready.
  if(item.status!=='ready'&&item.status!=='error'||justReady&&item.status==='ready')thumb.insertAdjacentHTML('beforeend',`<svg class="ring" viewBox="0 0 52 52" style="--c:${RING}" aria-hidden="true"><circle class="track" cx="26" cy="26" r="23"/><circle class="fill" cx="26" cy="26" r="23"/></svg>`);
  if(justReady&&item.status==='ready')haptic(10);
- const info=el('div',undefined,'info'),line=el('p');if(item.singer)line.append(el('span',`🎤 ${item.singer}`,'singer'),el('span',' · ','sep'));if(item.number)line.append(el('span',String(item.number),'qnum classic-only'),' ');line.append(item.artist,...(justReady&&item.status==='ready'?[el('em','준비 완료','ready-lamp classic-only')]:[]),el('span',' · ','sep'),el('span',statusKo(item,index),'status-ko classic-only'),el('span',statusText(item),'status'));info.append(el('h3',item.title),line);
+ if(item.status!=='ready'&&item.status!=='error')thumb.append(el('span','',`pct`));  // karaoke-server: % on the art
+ const info=el('div',undefined,'info'),line=el('p');if(item.singer)line.append(el('span',`🎤 ${item.singer}`,'singer'),el('span',' · ','sep'));if(item.number)line.append(el('span',String(item.number),'qnum classic-only'),' ');line.append(item.artist,...(justReady&&item.status==='ready'?[el('em','준비 완료','ready-lamp classic-only')]:[]),el('span',' · ','sep'),el('span',statusKo(item,index),'status-ko classic-only'),el('span',readyText(item),'status'));info.append(el('h3',item.title),line);
  if(item.status!=='ready'&&item.status!=='error'){const bar=el('div',undefined,'prepbar classic-only');bar.append(el('i'));info.append(bar);}
  if(item.error){const retry=el('button','Retry','retry');retry.onclick=()=>send({action:'retry',key:item.key});info.append(el('p',item.error,'error'),retry);}
  const remove=el('button','×','row-button');remove.setAttribute('aria-label',`Remove ${item.title}`);
@@ -578,3 +579,22 @@ function placeFun(playing){
  if(playing)FUN_ROWS.forEach((row,i)=>{if(funHome[i].nextSibling!==row)funHome[i].after(row);});
  else FUN_ROWS.forEach(row=>{if(row.parentElement!==idle)idle.append(row);});
 }
+
+// karaoke-server: one number for "how close is my song": the preparation steps (download, separate vocals, video,
+// lyrics) folded into a single 0-100% ring. Separating and syncing have no progress of their own: the server says
+// when they started and how long they should take, and we fill in between. It never goes backwards.
+const shownPct=new Map();
+function readyPercent(item){
+ const now=Date.now()/1000+skew,span=(a,b,f)=>a+(b-a)*Math.max(0,Math.min(1,f||0));
+ const timed=item.since&&item.expect?Math.min(.97,(now-item.since)/item.expect):0;
+ const pct={queued:0,downloading:item.step==='video'?span(70,74,item.progress):span(0,4,item.progress),separating:span(4,70,timed),syncing:span(74,99,timed),ready:100}[item.status]??0;
+ const best=Math.max(shownPct.get(item.key)||0,Math.floor(pct));shownPct.set(item.key,best);return best;
+}
+function readyText(item){return item.status==='error'?'Couldn\u2019t prepare':item.status==='ready'?'\u2713 Ready':`${readyPercent(item)}%`;}
+function showReady(row,item){
+ const pct=item.status==='ready'?100:readyPercent(item);
+ row.querySelector('.status').textContent=readyText(item);row.classList.toggle('is-ready',item.status==='ready');
+ const ring=row.querySelector('.ring');if(ring){ring.style.setProperty('--p',pct/100);ring.classList.remove('busy');}
+ const label=row.querySelector('.pct');if(label)label.textContent=item.status==='ready'?'\u2713':`${pct}%`;
+}
+setInterval(()=>{if(!state)return;for(const item of state.upcoming){const row=$('queue').querySelector(`[data-key="${item.key}"]`);if(row)showReady(row,item);}},1000);

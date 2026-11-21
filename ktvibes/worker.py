@@ -12,6 +12,19 @@ TIMING_VERSION = 10  # bump when alignment or guide output changes, so cached ti
 LYRICS_RECHECK = 7 * 86400  # a song LRCLIB had no lyrics for is looked up again after this long
 STARTED = time.time()  # energy-only timing (aligner failed) cached before this run is retried once
 
+# karaoke-server: the remote shows one 0-100% ring per song. Separating and syncing report no progress of their
+# own, so each gets a start time and an expected length (seconds per second of song, learned from real runs;
+# the defaults are what this CPU measured), and the remote fills the ring as time passes.
+STEP_RATE = {"separating": 0.36, "syncing": 0.17}
+
+def expect_step(item, step, duration):
+    item["since"] = time.time()
+    item["expect"] = round(max(3.0, STEP_RATE[step] * float(duration or 210)), 1)
+
+def learn_step(step, seconds, duration):
+    if duration and seconds and seconds > 0:
+        STEP_RATE[step] = round(0.6 * STEP_RATE[step] + 0.4 * seconds / float(duration), 4)
+
 def separate(source, destination):
     # Keep model imports off the server startup path.
     from .separate import separate as separate_audio
@@ -121,8 +134,10 @@ async def run(state, cache: Path):
                         meta.update(await asyncio.to_thread(youtube.download, item["id"], folder, reporter(state, item, "audio")))
                         check()
                     item["status"], item["step"], item["progress"] = "separating", None, None
+                    expect_step(item, "separating", meta.get("duration"))
                     await state.broadcast()
                     meta["separation_seconds"], gain = await asyncio.to_thread(separate, folder / "audio.m4a", folder)
+                    learn_step("separating", meta["separation_seconds"], meta.get("duration"))
                 meta["stem_gain"] = gain
                 save_meta(folder, meta)  # the gain must survive even if a later step fails
             check()
@@ -148,6 +163,8 @@ async def run(state, cache: Path):
                 item["music_end"] = known[1]
             item["gain"] = float(meta.get("stem_gain") or 1)
             item["status"], item["step"], item["progress"] = "syncing", None, None
+            expect_step(item, "syncing", item["duration"])
+            syncing_from = time.monotonic()
             await state.broadcast()
             identity = [item["artist"], item["title"]]
             cached = (folder / "lyrics.lrc").read_text(encoding="utf-8") if (folder / "lyrics.lrc").is_file() else ""
@@ -183,7 +200,9 @@ async def run(state, cache: Path):
             item["number"] = songbook.assign(cache, meta)
             save_meta(folder, meta)
             check()
+            learn_step("syncing", time.monotonic() - syncing_from, item["duration"])
             item["status"], item["step"], item["progress"] = "ready", None, None
+            item.pop("since", None); item.pop("expect", None)
             state.promote()
         except Removed:
             # Undoing the removal puts it back as queued, to be prepared again (fast from cache).
