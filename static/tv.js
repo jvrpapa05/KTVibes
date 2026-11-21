@@ -62,11 +62,11 @@ function render(next){
  const queued=state.upcoming.filter(i=>i.status!=='error');
  // karaoke-server: rebuild only when what it shows changes (a rebuild restarts the scrolling of long titles),
  // and start scrolling the new rows straight away.
- const deck=JSON.stringify([queued.length,innerWidth,innerHeight,...queued.slice(0,DECK_MAX).map(i=>[i.singer,i.title,i.artist,i.status==='ready'?'':'prep'])]);  // the % updates in place (deckPercents)
+ const deck=JSON.stringify([queued.length,...queued.slice(0,3).map(i=>[i.singer,i.title,i.artist,i.status==='ready'?'':'prep'])]);  // the % updates in place (deckPercents)
  if(deck!==deckShown){deckShown=deck;
  // The number and the % stay put; only the text between them scrolls (clipped, never behind the number).
- $('on-deck').replaceChildren(...queued.slice(0,DECK_MAX).map((i,n)=>{const row=el('li'),text=el('span',undefined,'deck-text');text.append(...(i.singer?[el('em',`${i.singer}: `,'deck-singer')]:[]),el('b',i.title),el('span',` ${i.artist}`));row.append(text,...(i.status==='ready'?[]:[(()=>{const pct=el('small',`${prepPercent(i,serverSkew)}%`,'deck-pct');pct.dataset.key=i.key;return pct;})()]),el('span',`${n+1}`,'deck-num'));return row;}));  // karaoke-server: number on the right, like the panel
- fitDeck(queued.length);
+ $('on-deck').replaceChildren(...queued.slice(0,3).map((i,n)=>{const row=el('li'),text=el('span',undefined,'deck-text');text.append(...(i.singer?[el('em',`${i.singer}: `,'deck-singer')]:[]),el('b',i.title),el('span',` ${i.artist}`));row.append(text,...(i.status==='ready'?[]:[(()=>{const pct=el('small',`${prepPercent(i,serverSkew)}%`,'deck-pct');pct.dataset.key=i.key;return pct;})()]),el('span',`${n+1}`,'deck-num'));return row;}));  // karaoke-server: number on the right, like the panel
+ if(queued.length>3)$('on-deck').append(el('li',`+${queued.length-3} more`,'more'));
  if(!queued.length)$('on-deck').append(el('li','Nothing queued','more'));
  marquees('#on-deck .deck-text');}
  // The two songs after the next one peek out from under its card between songs.
@@ -550,9 +550,7 @@ setInterval(()=>marquees(TV_MARQUEES),1500);addEventListener('resize',()=>marque
 // karaoke-server: tick the preparation percentages once a second (Up next rows in place, and the idle headline).
 setInterval(()=>{if(!state)return;
  for(const small of document.querySelectorAll('#on-deck .deck-pct')){const item=state.upcoming.find(i=>i.key===small.dataset.key);if(item)small.textContent=`${prepPercent(item,serverSkew)}%`;}
- showPrep(state.upcoming.filter(i=>i.status!=='error'));
- // Rows can grow after the first fit (the web font loads late): trim again so the list stays above the lyrics.
- const queuedNow=state.upcoming.filter(i=>i.status!=='error').length;if(queuedNow)fitDeck(queuedNow);},1000);
+ showPrep(state.upcoming.filter(i=>i.status!=='error'));},1000);
 
 // karaoke-server: every 30 s while a video plays, tell the server how the TV is coping, so lag can be traced to
 // decoding (dropped frames), the network (waiting for data) or sync (jumps, drift). One log line on the server.
@@ -566,17 +564,3 @@ setInterval(()=>{
  send({action:'tv_stats',value:{song:state.current.id,height:video.videoHeight,dropped,frames:total,waits:tvStats.waits,jumps:tvStats.jumps,max_drift:Math.round(tvStats.maxDrift*1000),agent:navigator.userAgent.slice(0,160)}});
  tvStats.jumps=0;tvStats.waits=0;tvStats.maxDrift=0;
 },30000);
-
-// karaoke-server: the Up next list shows as many songs as fit on the right side, down to just above the lyrics
-// (55% of the screen, less the small join QR code when it shows), then "+N more". Rebuilt when the window resizes.
-const DECK_MAX=20;
-function fitDeck(total){
- const deck=$('on-deck');deck.querySelector('li.more')?.remove();  // re-fit from scratch (it runs again every second)
- const corner=$('corner-join'),qr=corner&&!corner.hidden?corner.getBoundingClientRect().height+16:0;
- const limit=innerHeight*.55-qr,rows=[...deck.querySelectorAll('li:not(.more)')];
- const rowHeight=rows[0]?.getBoundingClientRect().height||0;
- if(rowHeight)while(rows.length>1&&deck.getBoundingClientRect().bottom+(rows.length<total?rowHeight:0)>limit)rows.pop().remove();
- const shown=deck.querySelectorAll('li:not(.more)').length;
- if(total>shown)deck.append(el('li',`+${total-shown} more`,'more'));
-}
-addEventListener('resize',()=>{deckShown='';});
