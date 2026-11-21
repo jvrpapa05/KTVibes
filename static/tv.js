@@ -65,7 +65,7 @@ function render(next){
  const deck=JSON.stringify([queued.length,...queued.slice(0,3).map(i=>[i.singer,i.title,i.artist,i.status==='ready'?'':'prep'])]);  // the % updates in place (deckPercents)
  if(deck!==deckShown){deckShown=deck;
  // The number and the % stay put; only the text between them scrolls (clipped, never behind the number).
- $('on-deck').replaceChildren(...queued.slice(0,3).map((i,n)=>{const row=el('li'),text=el('span',undefined,'deck-text');text.append(...(i.singer?[el('em',`${i.singer}: `,'deck-singer')]:[]),el('b',i.title),el('span',` ${i.artist}`));row.append(el('span',`${n+1}.`,'deck-num'),text,...(i.status==='ready'?[]:[(()=>{const pct=el('small',`${prepPercent(i,serverSkew)}%`,'deck-pct');pct.dataset.key=i.key;return pct;})()]));return row;}));
+ $('on-deck').replaceChildren(...queued.slice(0,3).map((i,n)=>{const row=el('li'),text=el('span',undefined,'deck-text');text.append(...(i.singer?[el('em',`${i.singer}: `,'deck-singer')]:[]),el('b',i.title),el('span',` ${i.artist}`));row.append(text,...(i.status==='ready'?[]:[(()=>{const pct=el('small',`${prepPercent(i,serverSkew)}%`,'deck-pct');pct.dataset.key=i.key;return pct;})()]),el('span',`${n+1}`,'deck-num'));return row;}));  // karaoke-server: number on the right, like the panel
  if(queued.length>3)$('on-deck').append(el('li',`+${queued.length-3} more`,'more'));
  if(!queued.length)$('on-deck').append(el('li','Nothing queued','more'));
  marquees('#on-deck .deck-text');}
@@ -471,7 +471,9 @@ function showUpNext(){
 // Cheers from the remotes float up the right edge, clear of the lyrics. Each tap sends a few;
 // a flood of taps is capped so the screen never fills up.
 function cheer(emoji){
- const count=Math.min(REDUCED.matches?1:3,30-document.querySelectorAll('.cheer').length);
+ // karaoke-server: one emoji per tap (was a burst of 3), so the TV shows exactly as many as were sent;
+ // at most 30 on screen at once.
+ const count=Math.min(1,30-document.querySelectorAll('.cheer').length);
  for(let i=0;i<count;i++){
   const node=el('span',emoji,'cheer');node.style.left=`${78+Math.random()*16}vw`;document.body.append(node);
   const drift=(Math.random()-.5)*12,rise=45+Math.random()*25,spin=(Math.random()-.5)*40;
