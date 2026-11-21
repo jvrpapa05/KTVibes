@@ -151,8 +151,9 @@ def check_lyrics(found: list[dict], records: list[dict]) -> None:
         if "guessed" in (r.get("parsed") or {}):
             r["parsed"] = r["parsed"]["guessed"]  # judge again from the title, with the larger set of records
     youtube.names_from_records(found, records)
-    youtube.mark_lyrics(found, [(youtube.record_song(c.get("trackName", ""), c.get("artistName", "")), c["length"], youtube.lead_artist(c.get("artistName", "")))
-                                for c in synced if c.get("length")])
+    tag = lambda c: (m.group(0) if (m := youtube.VERSION_TAG.search(c.get("trackName") or "")) else "")
+    youtube.mark_lyrics(found, [(youtube.record_song(c.get("trackName", ""), c.get("artistName", "")), c["length"],
+                                 youtube.artist_keys(c.get("artistName", "")), tag(c)) for c in synced if c.get("length")])
 
 class Song(BaseModel):
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")

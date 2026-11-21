@@ -582,6 +582,10 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         got = [(r["parsed"]["artist"], r["parsed"]["title"]) for r in results]
         self.assertEqual(got[:4], [("Taylor Swift", "Shake It Off"), ("XXXTENTACION", "Moonlight"), ("Hozier", "Take Me to Church"), ("Survivor", "Eye of the Tiger")])
         self.assertEqual(got[4], ("Adele", "Hello"))   # Lionel Richie's "Hello" isn't named in this title: unchanged
+        # a remix spelling doesn't name a video that isn't the remix (all of Keala Settle's records are remixes)
+        tim = [res("This Is Me - Keala Settle (Lyrics)", "7clouds", "This Is Me", "Keala Settle")]
+        names_from_records(tim, [{"artistName": "Keala Settle & The Greatest Showman Ensemble", "trackName": 'This Is Me (Dave Audé Remix) [From "The Greatest Showman"]'}] * 2)
+        self.assertEqual(tim[0]["parsed"]["title"], 'This Is Me [From "The Greatest Showman"]')
         # Filipino uploads often read "Song - Artist"; YouTube's majority must not overrule LRCLIB's records
         opm = [res("Kung Kailangan Mo Ako - Rey Valera (Official Lyric Video)", "Vicor Music", "Kung Kailangan Mo Ako", "Rey Valera") for _ in range(3)]
         names_from_records(opm, [{"artistName": "Rey Valera", "trackName": "Kung Kailangan Mo Ako"}])

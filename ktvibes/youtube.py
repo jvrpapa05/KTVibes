@@ -112,15 +112,19 @@ def record_song(track: str, artist: str) -> str:
 
 def mark_lyrics(results: list[dict], records: list[tuple], tolerance: float = LYRICS_TOLERANCE) -> None:
     """Flag results with synced lyrics of the same song, artist and length.
-    records: (song_name, seconds, lead_artist) from LRCLIB (lead_artist optional)."""
+    records: (song_name, seconds[, artist keys or a lead artist[, version tag]]) from LRCLIB."""
     for r in results:
         name = song_name((r.get("parsed") or {}).get("title", "")) or song_name(r.get("title", ""))
         whole = re.sub(r"\W+", "", (r.get("title") or "").casefold())
         text = whole + re.sub(r"\W+", "", f"{r.get('channel') or ''}{(r.get('parsed') or {}).get('artist', '')}".casefold())
         # the song's name, or (for titles like "Adele   Hello" that don't split) found inside the title; and the
         # record's artist in the title, channel or names (a flashmob of "Bohemian Rhapsody" is not Queen's)
-        same = lambda track, artist: (track == name or (len(track) >= 4 and track in whole)) and (not artist or artist in text)
-        diffs = [abs((r.get("duration") or 0) - rec[1]) for rec in records if rec[0] and same(rec[0], rec[2] if len(rec) > 2 else "")]
+        named = lambda artists: not artists or any(a in text for a in ([artists] if isinstance(artists, str) else artists))
+        # a remix/live/instrumental record only vouches for a video of that version
+        version = lambda tag: not tag or tag.casefold() in (r.get("title") or "").casefold()
+        same = lambda rec: (rec[0] == name or (len(rec[0]) >= 4 and rec[0] in whole)) and named(rec[2] if len(rec) > 2 else "") \
+            and version(rec[3] if len(rec) > 3 else "")
+        diffs = [abs((r.get("duration") or 0) - rec[1]) for rec in records if rec[0] and same(rec)]
         best = min(diffs, default=None)
         # a cover or live version can be as long as the record and still be sung differently: never "matching"
         r["lyrics_match"] = best is not None and best <= tolerance and bool(r.get("duration")) and r.get("kind") not in ("cover", "live")
@@ -131,6 +135,22 @@ def mark_lyrics(results: list[dict], records: list[tuple], tolerance: float = LY
 # "Song - Artist", the channel taken as the artist, "Audio"/"HQ"/"Remastered 2023" left in). LRCLIB's records for the
 # same search carry clean artist and song names; a result that clearly is one of them takes those names.
 LABELS = re.compile(r"official|lyrics?\b|\bvideo\b|\baudio\b|\bm/?v\b|\bhd\b|\bhq\b|vevo|- topic|karaoke", re.I)
+
+# karaoke-server: a version tag in a record's name: its timing is that version's, not the original's
+VERSION_TAG = re.compile(r"remix|\bmix\b|relift|instrumental|karaoke|sped ?up|slowed|nightcore|\blive\b|acoustic|"
+                         r"\bversion\b|\bversio\b|\bedit\b|\bcover\b|reimagined|unplugged|piano", re.I)
+GENERIC = re.compile(r"\b(?:the )?(?:ensemble|cast|soundtrack|original|orchestra|choir|band|official|music)\b", re.I)
+
+def artist_keys(artist: str) -> set[str]:
+    """Each artist in a credit ("Keala Settle & The Greatest Showman Ensemble"), also without generic words
+    ("The Greatest Showman"), normalized; for checking a video names the record's artist."""
+    keys = set()
+    for part in re.split(r",|&|/|\+| x | and | feat\.? | ft\.? | with ", (artist or "").casefold()):
+        for name in (part, GENERIC.sub(" ", part)):
+            key = re.sub(r"\W+", "", name)
+            if len(key) >= 3:
+                keys.add(key)
+    return keys
 
 def lead_artist(artist: str) -> str:
     return re.sub(r"\W+", "", re.split(r",|&| x | and | feat\.? | ft\.? | with ", (artist or "").casefold())[0])
@@ -166,7 +186,8 @@ def names_from_records(results: list[dict], records: list[dict]) -> None:
         if not votes[track]:
             del votes[track]
     # the spelling most records agree on (album uploads outnumber the odd one), then the shortest
-    known = {track: {artist: dict(zip(("artistName", "trackName"), min(spellings, key=lambda k: (-spellings[k], len(k[1])))))
+    # (a plain name beats a remix/live/instrumental spelling: "This Is Me", not "This Is Me (Dave Audé Remix)")
+    known = {track: {artist: dict(zip(("artistName", "trackName"), min(spellings, key=lambda k: (bool(VERSION_TAG.search(k[1])), -spellings[k], len(k[1])))))
                      for artist, spellings in artists.items()} for track, artists in votes.items()}
     for r in results:
         parsed = r.get("parsed") or {}
@@ -185,7 +206,13 @@ def names_from_records(results: list[dict], records: list[dict]) -> None:
             if chosen and (best is None or len(track) > len(best[0])):
                 best = (track, chosen)
         if best:
-            r["parsed"] = {"artist": best[1]["artistName"], "title": best[1]["trackName"], "guessed": parsed}
+            title = best[1]["trackName"]
+            tag = VERSION_TAG.search(title)
+            if tag and tag.group(0).casefold() not in (r.get("title") or "").casefold():
+                # only a remix/live spelling exists for this artist, and this video isn't that version: drop the tag
+                title = re.sub(r"\s*[(\[][^()\[\]]*" + re.escape(tag.group(0)) + r"[^()\[\]]*[)\]]|\s+-\s+[^-]*" + re.escape(tag.group(0)) + r".*$",
+                               "", title, flags=re.I).strip() or title
+            r["parsed"] = {"artist": best[1]["artistName"], "title": title, "guessed": parsed}
 
 def order_results(results: list[dict], query: str = "") -> list[dict]:
     """Group by kind (official first), keeping YouTube's order within each kind. karaoke-server: when one song has
