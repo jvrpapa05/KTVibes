@@ -78,7 +78,7 @@ new IntersectionObserver(([entry])=>{
 },{rootMargin:'0px 0px -40px 0px'}).observe($('hero'));
 $('dock-queue').onclick=()=>$('queue').scrollIntoView({behavior:REDUCED.matches?'auto':'smooth',block:'center'});
 // Reactions float up on this phone and on the TV. Quick taps add up into one "×3" note.
-for(const button of document.querySelectorAll('.react[data-emoji]'))button.onclick=()=>{  // karaoke-server: 💬/📷 are .react too
+function reactWith(button){  // karaoke-server: a function, so your own emoji buttons behave the same
  const emoji=button.dataset.emoji;send({action:'react',value:emoji});haptic(6);
  const box=button.getBoundingClientRect(),count=REDUCED.matches?1:5;
  for(let i=0;i<count;i++){
@@ -89,8 +89,9 @@ for(const button of document.querySelectorAll('.react[data-emoji]'))button.oncli
  }
  if(!REDUCED.matches)button.animate([{transform:'scale(1)'},{transform:'scale(1.3) rotate(-8deg)'},{transform:'scale(1)'}],{duration:400,easing:'cubic-bezier(.42,1.67,.21,.9)'});
  clearTimeout(button.timer);button.taps=(button.taps||0)+1;
- button.timer=setTimeout(()=>{toast(`Sent ${emoji}${button.taps>1?` ×${button.taps}`:''} to the device`);button.taps=0;},600);
-};
+ button.timer=setTimeout(()=>{toast(`Sent ${emoji}${button.taps>1?` ×${button.taps}`:''} to the TV`);button.taps=0;},600);
+}
+for(const button of document.querySelectorAll('.react[data-emoji]'))button.onclick=()=>reactWith(button);
 // Controls sheet: mix, key, speed, TV display and lyric fixes.
 let shownKey=null;
 function showControls(before){
@@ -596,3 +597,32 @@ setInterval(()=>{if(!state)return;for(const item of state.upcoming){const row=$(
 // karaoke-server: long titles scroll: queued songs, the now-singing card and the mini player.
 const REMOTE_MARQUEES='#queue [data-key] h3,#dock-title';  // #hero-title already wraps to 3 lines
 setInterval(()=>marquees(REMOTE_MARQUEES),1500);addEventListener('resize',()=>marquees(REMOTE_MARQUEES));
+
+// karaoke-server: your own emoji, up to 4 per phone (kept in this browser), next to the built-in cheers.
+const MY_EMOJI='karaoke.emoji',EMOJI_MAX=4;let myEmojiMemo=[];
+function myEmoji(){try{const list=JSON.parse(localStorage.getItem(MY_EMOJI)||'[]');return Array.isArray(list)?list:[];}catch{return myEmojiMemo;}}
+function saveEmoji(list){myEmojiMemo=list;try{localStorage.setItem(MY_EMOJI,JSON.stringify(list));}catch{}showMyEmoji();}
+// Exactly one emoji (skin tones, flags and combined ones like 👨‍🎤 count as one); no plain text.
+function oneEmoji(text){
+ const t=text.trim();if(!t||!/\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(t)||/[\p{L}\p{N}]/u.test(t.replace(/[#*0-9]\uFE0F?\u20E3/gu,'')))return null;
+ const parts=typeof Intl.Segmenter==='function'?[...new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(t)].length:[...t].length<=8?1:2;
+ return parts===1?t:null;
+}
+function showMyEmoji(){
+ for(const old of document.querySelectorAll('.react.custom'))old.remove();
+ const add=$('emoji-add'),list=myEmoji();
+ for(const emoji of list){const b=el('button',emoji,'react custom');b.dataset.emoji=emoji;b.setAttribute('aria-label',`Cheer ${emoji}`);b.onclick=()=>reactWith(b);add.before(b);}
+ $('emoji-mine').replaceChildren(...list.map((emoji,i)=>{const chip=el('button',undefined,'emoji-chip');chip.type='button';chip.append(el('span',emoji),el('b','×'));chip.setAttribute('aria-label',`Remove ${emoji}`);
+  chip.onclick=()=>saveEmoji(myEmoji().filter((_,j)=>j!==i));return chip;}));
+ $('emoji-mine').hidden=!list.length;
+}
+function emojiError(text){$('emoji-error').textContent=text;$('emoji-error').hidden=!text;}
+$('emoji-add').onclick=()=>{emojiError('');$('emoji-input').value='';$('emoji-box').hidden=false;setTimeout(()=>$('emoji-input').focus(),50);};
+$('emoji-done').onclick=()=>{$('emoji-box').hidden=true;};
+$('emoji-form').onsubmit=e=>{e.preventDefault();
+ const emoji=oneEmoji($('emoji-input').value),list=myEmoji();
+ if(!emoji)return emojiError('Pick one emoji from your emoji keyboard');
+ if(list.includes(emoji)||['👏','🔥','🎉','💚'].includes(emoji))return emojiError('You already have that one');
+ if(list.length>=EMOJI_MAX)return emojiError(`Up to ${EMOJI_MAX}: remove one first (tap it above)`);
+ saveEmoji([...list,emoji]);$('emoji-input').value='';emojiError('');haptic(8);};
+showMyEmoji();

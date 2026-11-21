@@ -1,6 +1,7 @@
 """All state mutations run on the event loop; queue entries have unique identities."""
 import asyncio
 import json
+import logging
 import math
 from pathlib import Path
 import re
@@ -15,6 +16,27 @@ def following(options, current):
 
 GUIDES = ("off", "latin", "jyutping", "hangul")
 REACTIONS = ("👏", "🔥", "🎉", "💚")  # cheers a remote can float up on the TV
+
+def one_emoji(value):
+    """karaoke-server: a phone's own cheer must be a single emoji (skin tones, flags, keycaps and ZWJ sequences
+    like 👨‍🎤 included), never plain text, so the cheer button can't put words on the TV."""
+    import unicodedata
+    if not isinstance(value, str) or not 1 <= len(value) <= 12:
+        return False
+    joiners = {0x200D, 0xFE0E, 0xFE0F, 0x20E3}
+    pictures = 0
+    for ch in value:
+        cp = ord(ch)
+        if cp in joiners or 0xE0020 <= cp <= 0xE007F or 0x1F3FB <= cp <= 0x1F3FF:
+            continue  # joiner, variation selector, keycap, flag tag, skin tone
+        if unicodedata.category(ch) in ("So", "Sk") or 0x1F1E6 <= cp <= 0x1F1FF:
+            pictures += 1
+            continue
+        if ch in "#*0123456789" and "\u20e3" in value:
+            pictures += 1
+            continue  # keycap base, e.g. 1️⃣
+        return False
+    return 1 <= pictures <= 4
 # karaoke-server: shout-outs (short text) and photos that pop up on the TV, always with the sender's singer name.
 FUN_COOLDOWN = 10  # seconds between shout-outs from one phone
 PHOTO_COOLDOWN = 3  # seconds between photos from one phone: a burst of photos piles up on the TV
@@ -343,6 +365,14 @@ class State:
 
     async def control(self, message, sender=None):
         action = message.get("action")
+        if action == "tv_stats":
+            # karaoke-server: the TV's 30-second playback report (resolution, dropped frames, waits for data,
+            # jumps, drift, browser), so video lag can be traced. One log line; nothing else changes.
+            value = message.get("value")
+            if sender is self.player and isinstance(value, dict):
+                keep = {k: value[k] for k in ("song", "height", "dropped", "frames", "waits", "jumps", "max_drift", "agent") if k in value}
+                logging.getLogger("uvicorn.error").info("TV playback %s", json.dumps(keep, ensure_ascii=False)[:600])
+            return
         if action == "shout":
             name = self.sender_name(message.get("singer"), message.get("device"))
             text = " ".join(str(message.get("value") or "").split())[:SHOUT_MAX]
@@ -369,7 +399,7 @@ class State:
                 return
         if action == "react":
             # A cheer goes straight to the TV and changes nothing, so there is nothing to save or broadcast.
-            if message.get("value") not in REACTIONS:
+            if message.get("value") not in REACTIONS and not one_emoji(message.get("value")):  # karaoke-server: own emoji too
                 raise ValueError("Unknown reaction")
             if self.player is not None:
                 await self.send(self.player, {"type": "react", "value": message["value"]})

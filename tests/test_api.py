@@ -186,7 +186,10 @@ class APITests(unittest.TestCase):
                 remote.send_json({'action': 'react', 'value': '🔥'})
                 self.assertEqual(tv.receive_json(), {'type': 'react', 'value': '🔥'})
                 self.assertEqual(self.main.state.revision, revision)  # no broadcast, nothing saved
+                # karaoke-server: phones may cheer with their own emoji; plain text is still refused.
                 remote.send_json({'action': 'react', 'value': '💩'})
+                self.assertEqual(tv.receive_json(), {'type': 'react', 'value': '💩'})
+                remote.send_json({'action': 'react', 'value': 'spam'})
                 self.assertEqual(remote.receive_json()['message'], 'Unknown reaction')
 
     def test_newest_tv_takes_over(self):

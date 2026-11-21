@@ -268,7 +268,8 @@ function placeLyrics(list){
 }
 // Stems are stored scaled down to fit FLAC; the gain restores their original level.
 // Speed changes tempo only (the browser keeps pitch); the key shift is applied by the worklet.
-function applyTempo(){const speed=state?.speed??1;for(const media of [music,voice,video]){media.defaultPlaybackRate=speed;if(media.playbackRate!==speed)media.playbackRate=speed;}if(shifter)shifter.parameters.get('ratio').value=2**((state?.key??0)/12);}
+function applyTempo(){const speed=state?.speed??1;for(const media of [music,voice]){  // karaoke-server: the video's rate is set by the sync loop
+ video.defaultPlaybackRate=speed;media.defaultPlaybackRate=speed;if(media.playbackRate!==speed)media.playbackRate=speed;}if(shifter)shifter.parameters.get('ratio').value=2**((state?.key??0)/12);}
 function applyGain(){applyTempo();if(!musicGain)return;musicGain.gain.value=(state?.music??1)*stemGain;voiceGain.gain.value=(state?.vocal??0.1)*stemGain;}
 // The theme can be picked before sound is on; it switches the whole room (TV and phones).
 for(const b of document.querySelectorAll('[data-theme-pick]'))b.onclick=()=>send({action:'theme',value:b.dataset.themePick});
@@ -342,7 +343,14 @@ function frame(now){
   $('video-shade').hidden=video.hidden;
   if(state.current&&!waiting&&enabled&&state.playing)start();
   if(showVideo()&&!waiting&&!buffering&&!music.paused&&state.playing&&video.readyState>=3){
-   if(Math.abs(video.currentTime-music.currentTime)>0.12)video.currentTime=music.currentTime;
+   // karaoke-server: catch up gently. A small drift is fixed by playing the video up to 10% faster or slower,
+   // which you can't see; only a big one (over 1.5 s) jumps. Every jump makes the browser re-decode from the
+   // last keyframe, so on a slower TV jumping at 0.12 s kept stalling the video and drifting it again.
+   const drift=music.currentTime-video.currentTime,speed=state.speed??1;
+   if(Math.abs(drift)>1.5){video.currentTime=music.currentTime;video.playbackRate=speed;tvStats.jumps++;}
+   else if(Math.abs(drift)>0.12)video.playbackRate=speed*(1+Math.max(-.1,Math.min(.1,drift*.25)));
+   else if(video.playbackRate!==speed)video.playbackRate=speed;
+   if(Math.abs(drift)<=1.5)tvStats.maxDrift=Math.max(tvStats.maxDrift,Math.abs(drift));  // song-start syncs aren't lag
    if(video.paused&&!video.ended&&!videoStarting){videoStarting=true;const token=generation;video.play().catch(()=>{if(token===generation)video.hidden=true;}).finally(()=>{if(token===generation)videoStarting=false;});}
   }else if(!video.paused)video.pause();
   if(state.current){
@@ -538,3 +546,16 @@ setInterval(()=>marquees(TV_MARQUEES),1500);addEventListener('resize',()=>marque
 setInterval(()=>{if(!state)return;
  for(const small of document.querySelectorAll('#on-deck .deck-pct')){const item=state.upcoming.find(i=>i.key===small.dataset.key);if(item)small.textContent=`${prepPercent(item,serverSkew)}%`;}
  showPrep(state.upcoming.filter(i=>i.status!=='error'));},1000);
+
+// karaoke-server: every 30 s while a video plays, tell the server how the TV is coping, so lag can be traced to
+// decoding (dropped frames), the network (waiting for data) or sync (jumps, drift). One log line on the server.
+const tvStats={jumps:0,waits:0,maxDrift:0};
+video.addEventListener('waiting',()=>{if(!video.paused)tvStats.waits++;});
+let lastFrames={dropped:0,total:0};
+setInterval(()=>{
+ if(!state?.current||video.paused||video.hidden||!video.videoHeight)return;
+ const q=video.getVideoPlaybackQuality?.()||{droppedVideoFrames:0,totalVideoFrames:0};
+ const dropped=q.droppedVideoFrames-lastFrames.dropped,total=q.totalVideoFrames-lastFrames.total;lastFrames={dropped:q.droppedVideoFrames,total:q.totalVideoFrames};
+ send({action:'tv_stats',value:{song:state.current.id,height:video.videoHeight,dropped,frames:total,waits:tvStats.waits,jumps:tvStats.jumps,max_drift:Math.round(tvStats.maxDrift*1000),agent:navigator.userAgent.slice(0,160)}});
+ tvStats.jumps=0;tvStats.waits=0;tvStats.maxDrift=0;
+},30000);

@@ -340,6 +340,22 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
             self.assertEqual(done[items[0]['id']], (False, False))                       # nor the one the worker has
             self.assertEqual(json.loads((cache / items[1]['id'] / 'meta.json').read_text())['duration'], 200)
 
+    async def test_own_emoji_cheers_are_single_emoji_only(self):
+        # karaoke-server: phones can cheer with their own emoji, but never with plain text.
+        from ktvibes.queue import one_emoji
+        for good in ['😎', '👍🏽', '🇵🇭', '👨\u200d🎤', '❤️', '1️⃣', '🫶']:
+            self.assertTrue(one_emoji(good), good)
+        for bad in ['hi', 'a😎', '', '12', '<b>', '😎' * 5, None, 3]:
+            self.assertFalse(one_emoji(bad), bad)
+        state = State(); tv, sent = object(), []
+        async def fake_send(ws, message):
+            sent.append(message); return True
+        state.send = fake_send; state.player = tv
+        await state.control({'action': 'react', 'value': '🦄'})
+        self.assertEqual(sent[-1], {'type': 'react', 'value': '🦄'})
+        with self.assertRaises(ValueError):
+            await state.control({'action': 'react', 'value': 'spam text'})
+
     def test_singer_names_are_unique_per_phone_until_idle(self):
         state = State()
         self.assertEqual(state.claim_singer('  Anna ', 'phone-1'), 'Anna')
