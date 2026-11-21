@@ -159,7 +159,7 @@ $('lyric-version').onclick=()=>state?.current&&pickLyrics(state.current);
 function openSheet(){document.body.classList.add('sheet-open');$('sheet').inert=false;haptic(8);requestAnimationFrame(()=>SEGMENTED.forEach(placePill));}
 function closeSheet(){document.body.classList.remove('sheet-open');$('sheet').inert=true;}
 $('open-controls').onclick=$('dock-now').onclick=$('dock-settings').onclick=()=>document.body.dataset.theme==='classic'?classicUi.setTab('settings'):openSheet();
-$('scrim').onclick=$('sheet-handle').onclick=closeSheet;
+$('scrim').onclick=$('sheet-handle').onclick=$('sheet-close').onclick=closeSheet;  // karaoke-server: plus an ✕
 // Classic theme: room time in Settings. Classic is always two-line lyrics.
 function showClassic(){const on=state.theme==='classic';$('room-time').hidden=!on;document.querySelector('[data-action=lyric_mode]').closest('.seg-row').hidden=on;roomLeft();}
 function roomLeft(){if(!state?.room_ends)return;const left=secondsLeft(state),end=new Date(state.room_ends*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
