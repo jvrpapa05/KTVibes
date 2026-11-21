@@ -22,6 +22,28 @@ class LyricsTests(unittest.TestCase):
         self.assertEqual(parse_title('Zack Tabudlo - Binibini | Lyric Visualizer'), {'artist': 'Zack Tabudlo', 'title': 'Binibini'})
         self.assertEqual(parse_title('India.Arie - Video'), {'artist': 'India.Arie', 'title': 'Video'})  # a song named "Video" stays
 
+    def test_search_results_are_labelled_and_official_videos_come_first(self):
+        # karaoke-server: kinds for the remote's labels, and a stable re-order (YouTube's order kept within a kind).
+        from unittest import mock
+        from ktvibes import youtube
+        self.assertEqual(youtube.kind('Bruno Mars - Die With A Smile (Official Lyric Video)', 'Bruno Mars', 'Bruno Mars'), 'lyric')
+        self.assertEqual(youtube.kind('Die With A Smile', 'Lady Gaga - Topic'), 'audio')
+        self.assertEqual(youtube.kind('Adele - Hello (Live at the BBC)', 'Adele', 'Adele'), 'live')
+        self.assertEqual(youtube.kind('Taylor Swift - Shake It Off', 'TaylorSwiftVEVO', 'Taylor Swift'), 'official')
+        self.assertEqual(youtube.kind('someone sings shallow', 'random guy'), 'other')
+        entries = [{'id': f'aaaaaaaaaa{n}', 'title': t, 'channel': c, 'duration': 200} for n, (t, c) in enumerate([
+            ('Artist - Song (Lyrics)', 'lyrics hub'), ('Artist - Song (Live)', 'Artist'), ('Artist - Song (Official Music Video)', 'Artist'),
+            ('Artist - Song (Official Audio)', 'Artist'), ('Artist - Song lyric video', 'other hub')])]
+        class FakeYDL:
+            def __init__(self, *a): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def extract_info(self, *a, **k): return {'entries': entries}
+        with mock.patch('yt_dlp.YoutubeDL', FakeYDL):
+            got = youtube.search('artist song')
+        self.assertEqual([r['kind'] for r in got], ['official', 'lyric', 'lyric', 'audio', 'live'])
+        self.assertEqual([r['id'] for r in got][1:3], ['aaaaaaaaaa0', 'aaaaaaaaaa4'])  # lyric videos keep YouTube's order
+
     def test_title_metadata_preserves_original_script(self):
         self.assertEqual(parse_title('周杰倫 - 晴天 (Official MV)'), {'artist': '周杰倫', 'title': '晴天'})
         self.assertEqual(parse_title('아이유 - 좋은 날 (Official Audio)'), {'artist': '아이유', 'title': '좋은 날'})

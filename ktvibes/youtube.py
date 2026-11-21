@@ -47,6 +47,29 @@ def is_music(title: str, duration) -> bool:
     """A plausible single song: 1-10 minutes, and not a reaction, lesson, mix or similar."""
     return not NOT_MUSIC.search(title or "") and (duration is None or 60 <= duration <= 600)
 
+# karaoke-server: each search result gets a kind, shown as a label on the remote, and a page is re-ordered so official
+# music videos come first (they give the best room experience), then lyric videos, audio, others and live recordings.
+# YouTube's own order is kept within each kind. Lyric/audio/live words are checked before "official", so an
+# "Official Lyric Video" counts as a lyric video and an "Official Audio" as audio.
+KIND_ORDER = {"official": 0, "lyric": 1, "audio": 2, "other": 3, "live": 4}
+LYRIC = re.compile(r"\blyrics?\b|lyric video|\(lyric\)|가사|歌詞|歌词", re.I)
+AUDIO = re.compile(r"official audio|\baudio\b|visuali[sz]er", re.I)
+LIVE = re.compile(r"\blive\b|live at|live session|\bconcert\b|\bunplugged\b", re.I)
+OFFICIAL = re.compile(r"official (?:music )?video|\bm/?v\b|official mv|뮤직비디오", re.I)
+
+def kind(title: str, channel: str = "", artist: str = "") -> str:
+    """What sort of upload a search result is: official, lyric, audio, live or other."""
+    title, channel = title or "", channel or ""
+    if LYRIC.search(title):
+        return "lyric"
+    if AUDIO.search(title) or channel.endswith(" - Topic"):
+        return "audio"
+    if LIVE.search(title):
+        return "live"
+    if OFFICIAL.search(title) or re.search(r"vevo$", channel, re.I) or (artist and same_name(artist, channel)):
+        return "official"
+    return "other"
+
 def search(query: str, page: int = 0, size: int = 10) -> list[dict]:
     """One page of results; YouTube search has no offset, so later pages fetch the earlier ones too."""
     import yt_dlp
@@ -54,10 +77,13 @@ def search(query: str, page: int = 0, size: int = 10) -> list[dict]:
     with yt_dlp.YoutubeDL({**base_options(), "extract_flat": True, "quiet": True, "noprogress": True, "skip_download": True,
                            "socket_timeout": 20, "playlist_items": f"{first}-{last}"}) as ydl:
         result = ydl.extract_info(f"ytsearch{last}:{query}", download=False)
-    return [{"id": e["id"], "title": e.get("title", "Untitled"), "channel": e.get("channel") or e.get("uploader", ""),
+    results = [{"id": e["id"], "title": e.get("title", "Untitled"), "channel": e.get("channel") or e.get("uploader", ""),
              "duration": e.get("duration"), "thumbnail": f'https://i.ytimg.com/vi/{e["id"]}/mqdefault.jpg',
              "parsed": parse_title(e.get("title", ""), e.get("channel") or e.get("uploader", ""))}
             for e in result.get("entries", []) if e and ID.fullmatch(e.get("id", "")) and is_music(e.get("title", ""), e.get("duration"))]
+    for r in results:
+        r["kind"] = kind(r["title"], r["channel"], r["parsed"].get("artist", ""))
+    return sorted(results, key=lambda r: KIND_ORDER[r["kind"]])  # stable: YouTube's order within each kind
 
 def _extract(options: dict, video_id: str, progress=None, attempts: int = 4) -> dict:
     """Download with fresh stream URLs on HTTP 403, which YouTube returns intermittently.

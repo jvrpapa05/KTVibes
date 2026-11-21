@@ -320,3 +320,7 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
 .lyric-applying.done strong{color:var(--lime)}
 .lyric-applying.failed strong{color:#ffaaa2}
 .la-again{margin-top:6px;background:var(--lime);color:#1a2215;font-weight:700;border:0}
+/* karaoke-server: search result kind labels */
+.kind{display:inline-block;padding:1px 7px;border-radius:5px;font-size:10.5px;font-weight:700;letter-spacing:.3px;vertical-align:1px;background:#ffffff14;color:#fffb}
+.kind-official{background:#d7fc7026;color:var(--lime)}
+.kind-live{background:#ffb34726;color:#ffc56b}

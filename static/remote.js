@@ -308,9 +308,13 @@ const enqueue=song=>api('/api/queue',{method:'POST',headers:{'Content-Type':'app
 const ICONS={add:'<path d="M12 5v14M5 12h14"/>',added:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',failed:'<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/>'};
 function icon(node,name){node.className=`result-icon ${name}`;node.innerHTML=`<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;}
 // One tap queues the song with the artist/title parsed from YouTube (or confirmed earlier, for recent songs).
+const KIND_LABEL={official:'Official video',lyric:'Lyric video',audio:'Audio',live:'Live'};
 function showResult(song,list=$('results'),wrap=row=>row,index=-1){
  const b=el('button',undefined,index<0?'result':'result enter');if(index>=0)b.style.setProperty('--i',index);
- const image=el('img');image.src=song.thumbnail;image.alt='';const info=el('div');const title=el('strong',song.title);if(song.cached)title.append(el('span','READY','tag'));const note=el('small',undefined,'result-note classic-only');info.append(title,el('small',`${song.channel} · ${clock(song.duration)}`),note);const status=el('span');icon(status,'add');b.append(image,info,status);
+ const image=el('img');image.src=song.thumbnail;image.alt='';const info=el('div');const title=el('strong',song.title);if(song.cached)title.append(el('span','READY','tag'));const note=el('small',undefined,'result-note classic-only');const meta=el('small',`${song.channel} · ${clock(song.duration)}`);
+ // karaoke-server: what kind of upload it is (results come official videos first)
+ if(KIND_LABEL[song.kind])meta.prepend(el('span',KIND_LABEL[song.kind],`kind kind-${song.kind}`),' ');
+ info.append(title,meta,note);const status=el('span');icon(status,'add');b.append(image,info,status);
  // Classic swaps the channel line for what happened to the add.
  const mark=(name,...text)=>{b.classList.remove('added','failed');b.classList.add(name);note.replaceChildren(...text);};
  b.onclick=async()=>{
