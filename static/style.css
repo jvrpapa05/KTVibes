@@ -182,3 +182,7 @@ body.still :is(.tv-tools,.tv-bottom,.open-remote){opacity:0;pointer-events:none}
 .mq-on{text-overflow:clip!important;-webkit-mask-image:linear-gradient(90deg,#000 0,#000 92%,transparent);mask-image:linear-gradient(90deg,#000 0,#000 92%,transparent)}
 .mq-on>.mq{animation:mq var(--mq-time,8s) ease-in-out infinite alternate}
 @keyframes mq{0%,15%{transform:translateX(0)}85%,100%{transform:translateX(var(--mq-shift,0))}}
+/* karaoke-server: song notices on the TV show the artwork; the icon sits on its corner as a badge */
+.osd-art{flex:none;width:64px;height:64px;border-radius:18px;object-fit:cover;box-shadow:0 6px 18px #0008}
+.osd.has-art .osd-icon{position:absolute;left:58px;top:50%;width:28px;height:28px;margin-top:6px;border-radius:50%;font-size:15px;box-shadow:0 0 0 3px #202a1c}
+.osd.has-art .osd-text{margin-left:4px}

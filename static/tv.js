@@ -419,16 +419,16 @@ function showChanges(s){
 // Queue changes from any remote get the same card: what was added, removed, moved, or became ready.
 let lastQueue=null;
 function showQueueChange(s){
- const queue=s.upcoming.map(i=>({key:i.key,title:i.title,singer:i.singer,status:i.status})),before=lastQueue;lastQueue=queue;
+ const queue=s.upcoming.map(i=>({key:i.key,id:i.id,title:i.title,singer:i.singer,status:i.status})),before=lastQueue;lastQueue=queue;
  if(!before)return;
  const old=new Map(before.map(i=>[i.key,i])),keys=new Set(queue.map(i=>i.key)),stage=s.current?.key;
  const added=queue.find(i=>!old.has(i.key)),removed=before.find(i=>!keys.has(i.key)&&i.key!==stage);
- if(added)return showBadge('+',added.singer?`Queued by ${added.singer}`:'Queued',added.title);
- if(removed)return showBadge('✕','Removed',removed.title);
+ if(added)return showBadge('+',added.singer?`Queued by ${added.singer}`:'Queued',added.title,null,added.id);
+ if(removed)return showBadge('✕','Removed',removed.title,null,removed.id);
  const failed=queue.find(i=>i.status==='error'&&old.get(i.key).status!=='error');
- if(failed)return showBadge('!','Couldn’t prepare',failed.title);
+ if(failed)return showBadge('!','Couldn’t prepare',failed.title,null,failed.id);
  const ready=queue.find(i=>i.status==='ready'&&old.get(i.key).status!=='ready');
- if(ready)return showBadge('✓','Ready to sing',ready.title);
+ if(ready)return showBadge('✓','Ready to sing',ready.title,null,ready.id);
  const order=before.filter(i=>keys.has(i.key)).map(i=>i.key),now=queue.map(i=>i.key);
  if(order.join()!==now.join()){
   // Name the song that moved furthest, with its new place in line.
@@ -440,8 +440,10 @@ function showQueueChange(s){
 // Classic names each notice the way the machine does.
 const KO_NAMES={Music:'반주',Vocals:'음성',Speed:'템포',Key:'키','Lyric timing':'싱크','Lyric size':'가사 크기',Video:'영상',Lyrics:'가사',Pronunciation:'가이드',Queued:'예약',Removed:'취소','Couldn’t prepare':'오류','Ready to sing':'준비 완료'};
 // Springs in, pulses the icon on each further change while visible, then shrinks away.
-function showBadge(icon,name,value,range){
+function showBadge(icon,name,value,range,art){
  const osd=$('guide-badge'),meter=$('osd-meter'),visible=!osd.hidden&&!osd.classList.contains('out');
+ // karaoke-server: song notices show the song's artwork (as on the phone), with the icon as a badge on its corner.
+ const pic=$('osd-art');osd.classList.toggle('has-art',!!art);pic.hidden=!art;if(art&&pic.dataset.id!==art){pic.dataset.id=art;pic.src=thumbnail(art);}
  $('guide-icon').textContent=icon;$('osd-name').textContent=classic()?KO_NAMES[name]??(name.startsWith('Moved')?'순서':name):name;$('guide-label').textContent=value;
  meter.hidden=!range;
  if(range){const [a,b]=range;meter.style.setProperty('--from',Math.min(a,b));meter.style.setProperty('--to',Math.max(a,b));}
