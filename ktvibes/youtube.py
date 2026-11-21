@@ -91,7 +91,25 @@ def search(query: str, page: int = 0, size: int = 10) -> list[dict]:
             for e in result.get("entries", []) if e and ID.fullmatch(e.get("id", "")) and is_music(e.get("title", ""), e.get("duration"))]
     for r in results:
         r["kind"] = kind(r["title"], r["channel"], r["parsed"].get("artist", ""))
-    return sorted(results, key=lambda r: KIND_ORDER[r["kind"]])  # stable: YouTube's order within each kind
+    return order_results(results)
+
+def order_results(results: list[dict]) -> list[dict]:
+    """Group by kind (official first), keeping YouTube's order within each kind. karaoke-server: when one song has
+    several official videos, the shortest comes first. Long cuts often have a story intro or skits that throw the
+    lyrics off (user, 2026-11-21). Different songs keep YouTube's relevance order."""
+    def song(r):
+        # the song's name alone: no "ft. X", no "(Explicit)", "(Taylor's Version)", "(2003 Edit)"...
+        title = (r.get("parsed") or {}).get("title", "").casefold()
+        title = re.split(r"\s+(?:ft\.?|feat\.?|featuring)\s|[(\[]", title)[0]
+        return re.sub(r"\W+", "", title) or r["id"]
+    first = {}
+    for i, r in enumerate(results):
+        first.setdefault(song(r), i)
+    def key(r):
+        if r["kind"] != "official":
+            return (KIND_ORDER[r["kind"]], 0, 0)
+        return (0, first[song(r)], r.get("duration") or float("inf"))
+    return sorted(results, key=key)
 
 def _extract(options: dict, video_id: str, progress=None, attempts: int = 4) -> dict:
     """Download with fresh stream URLs on HTTP 403, which YouTube returns intermittently.

@@ -498,6 +498,17 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
             self.assertEqual(kind(title), want, title)
         self.assertGreater(KIND_ORDER["cover"], KIND_ORDER["other"])
 
+    def test_shortest_official_video_of_a_song_comes_first(self):
+        # karaoke-server: long official cuts often have a story intro that throws the lyrics off
+        from ktvibes.youtube import order_results
+        r = lambda i, kind, title, d: {"id": i, "kind": kind, "duration": d, "parsed": {"title": title}}
+        out = order_results([r("lyric", "lyric", "Soft", 200), r("long", "official", "Soft", 420), r("other", "official", "Thick and Thin", 300),
+                             r("short", "official", "Soft!", 215), r("nodur", "official", "Soft", None)])
+        self.assertEqual([x["id"] for x in out], ["short", "long", "nodur", "other", "lyric"])
+        out = order_results([r("a", "official", "Telephone ft. Beyoncé", 571), r("b", "official", "Telephone ft. Beyoncé (Explicit) ft. Beyoncé", 572),
+                             r("c", "official", "Telephone Feat Beyoncé", 243), r("d", "official", "Poker Face", 214)])
+        self.assertEqual([x["id"] for x in out], ["c", "a", "b", "d"])
+
     def test_singer_names_are_unique_per_phone_until_idle(self):
         state = State()
         self.assertEqual(state.claim_singer('  Anna ', 'phone-1'), 'Anna')
