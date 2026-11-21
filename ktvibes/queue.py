@@ -392,10 +392,7 @@ class State:
             video_id, meta = found
             item = await self.add(video_id, meta["artist"], meta["title"])
             item["number"] = wanted
-            if message.get("next"):  # 우선예약: sing it next
-                self.upcoming.remove(item)
-                self.upcoming.insert(0, item)
-                await self.broadcast()
+            # karaoke-server: no 우선예약 (jump to the front); the queue plays in order.
             if self.player is not None:
                 await self.send(self.player, {"type": "reserved", "number": wanted})
             return
@@ -478,11 +475,8 @@ class State:
                 raise ValueError("That song is already in the queue")
             item.update(status="queued", error=None, step=None, progress=None)
         elif action == "reorder":
-            keys = message.get("keys", [])
-            if len(keys) != len(self.upcoming) or set(keys) != {i["key"] for i in self.upcoming}:
-                raise ValueError("Queue changed; try reordering again")
-            items = {i["key"]: i for i in self.upcoming}
-            self.upcoming = [items[k] for k in keys]
+            # karaoke-server: first come, first served. Songs can't be moved (removed songs can still be undone).
+            raise ValueError("The queue plays in order: songs can't be moved")
         elif action == "progress":
             self.position = max(0, min(number(message["position"]), self.current["duration"]))
         else:

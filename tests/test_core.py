@@ -287,6 +287,15 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         await state.control({'action': 'hide', 'id': shout['id']})
         self.assertEqual(sent[-1], (tv, {'type': 'hide', 'id': shout['id']}))
 
+    async def test_queue_plays_in_order_and_cannot_be_reordered(self):
+        # karaoke-server: first come, first served.
+        state = State()
+        a = await state.add('aaaaaaaaaaa', 'A', 'First')
+        b = await state.add('bbbbbbbbbbb', 'B', 'Second')
+        with self.assertRaisesRegex(ValueError, "can't be moved"):
+            await state.control({'action': 'reorder', 'keys': [b['key'], a['key']]})
+        self.assertEqual([i['title'] for i in state.upcoming], ['First', 'Second'])
+
     def test_singer_names_are_unique_per_phone_until_idle(self):
         state = State()
         self.assertEqual(state.claim_singer('  Anna ', 'phone-1'), 'Anna')
@@ -356,6 +365,8 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         self.assertIs(state.current, a)
         await state.control({'action': 'ended', 'key': a['key']}, state.player)
         self.assertIsNone(state.current)
+
+    @unittest.skip("karaoke-server: the queue plays in order; songs can\'t be moved")
 
     async def test_reorder_requires_current_members(self):
         state = State()
@@ -485,6 +496,8 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
             self.assertEqual((again.theme, again.room_ends), ('classic', ends))
             with self.assertRaises(ValueError):
                 await again.control({'action': 'add_time', 'minutes': 0})
+
+    @unittest.skip("karaoke-server: the queue plays in order; songs can\'t be moved")
 
     async def test_reserve_next_puts_the_song_first_with_its_number(self):
         with tempfile.TemporaryDirectory() as temp:
