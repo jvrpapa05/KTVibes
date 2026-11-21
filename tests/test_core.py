@@ -226,6 +226,26 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((state.lyric_scale, state.video_mode, state.lyric_mode, state.music), (2.0, 'blur', 'scroll', 0.6))
         self.assertEqual(state.profiles['bea']['video_mode'], 'show')
 
+    async def test_a_phone_edits_its_own_profile_not_the_singer_on_stage(self):
+        # karaoke-server: PC moves vocals to 51% during Vince's song: PC's profile changes, Vince's song and profile don't.
+        state = State()
+        state.claim_singer('Vince', 'phone-v'); state.claim_singer('PC', 'phone-pc')
+        (await state.add('aaaaaaaaaaa', 'A', 'S', 'Vince'))['status'] = 'ready'
+        (await state.add('bbbbbbbbbbb', 'A', 'S', 'PC'))['status'] = 'ready'
+        state.promote()
+        await state.control({'action': 'vocal', 'value': 0.2, 'singer': 'Vince', 'device': 'phone-v'})  # Vince, live
+        await state.control({'action': 'vocal', 'value': 0.51, 'singer': 'PC', 'device': 'phone-pc'})   # PC, saved for later
+        await state.control({'action': 'key', 'value': 3, 'singer': 'pc', 'device': 'phone-pc'})
+        self.assertEqual(state.vocal, 0.2)                           # Vince's song keeps sounding as Vince set it
+        self.assertEqual(state.profiles['vince']['vocal'], 0.2)
+        self.assertEqual((state.profiles['pc']['vocal'], state.profiles['pc']['key']), (0.51, 3))
+        self.assertIn('profiles', state.snapshot())
+        state.advance()                                               # PC's turn: PC's settings load
+        self.assertEqual((state.vocal, state.key), (0.51, 3))
+        with self.assertRaisesRegex(ValueError, 'reload'):            # a phone that doesn't hold the name can't edit it
+            await state.control({'action': 'vocal', 'value': 0.9, 'singer': 'Vince', 'device': 'phone-pc'})
+        self.assertEqual(state.profiles['vince']['vocal'], 0.2)
+
     def test_singer_names_are_unique_per_phone_until_idle(self):
         state = State()
         self.assertEqual(state.claim_singer('  Anna ', 'phone-1'), 'Anna')

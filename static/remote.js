@@ -14,7 +14,13 @@ function toast(text,action,kind){
  if(action){$('toast-action').textContent=action.label;$('toast-action').onclick=()=>{$('toast').classList.remove('on');action.run();};}
  $('toast').classList.add('on');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('on'),action?6000:2600);
 }
-const send=connect('remote',render,message=>toast(message,undefined,'err'));
+const sendRaw=connect('remote',render,message=>toast(message,undefined,'err'));
+// karaoke-server: settings carry who's changing them; the server saves them to that singer's profile (live only on their own song).
+const PROFILE_ACTIONS=new Set(['vocal','music','key','speed','lyric_scale','video_mode','lyric_mode']);
+const send=message=>sendRaw(PROFILE_ACTIONS.has(message.action)&&singer()?{...message,singer:singer(),device:deviceId()}:message);
+// What the settings sheet shows: the room while it's your song (or a song without a name), otherwise your own profile.
+function editingOwn(){const me=singer().toLowerCase(),on=(state?.current?.singer||'').toLowerCase();return !!me&&(!state?.current||(!!on&&on!==me));}
+function view(){if(!editingOwn())return state;const mine=state.profiles?.[singer().toLowerCase()];return {...state,...(mine||{})};}
 function render(next){
  const before=state;state=next;state.received=Date.now()/1000;
  // The header pill reports the TV, since that decides whether anything can play.
@@ -89,18 +95,21 @@ for(const button of document.querySelectorAll('.react'))button.onclick=()=>{
  button.timer=setTimeout(()=>{toast(`Sent ${emoji}${button.taps>1?` ×${button.taps}`:''} to the device`);button.taps=0;},600);
 };
 // Controls sheet: mix, key, speed, TV display and lyric fixes.
+let shownKey=null;
 function showControls(before){
+ const v=view();$('sheet-scope').textContent=editingOwn()?`Your settings · used when ${singer()}'s songs play`:'Changes show on the device';
  for(const id of ['skip','earlier','later','lyric-version','scrub','key-down','key-up'])$(id).disabled=!state.current;
  $('scrub').max=state.current?.duration||1;
- for(const [id,value] of [['vocal',state.vocal],['music',state.music],['speed',state.speed],['lyric-scale',state.lyric_scale]]){
+ for(const [id,value] of [['vocal',v.vocal],['music',v.music],['speed',v.speed],['lyric-scale',v.lyric_scale]]){
   if(document.activeElement!==$(id)&&!gliding)$(id).value=value;$(`${id}-value`).textContent=`${Math.round(value*100)}%`;
  }
- for(const b of document.querySelectorAll('.presets button'))b.setAttribute('aria-pressed',Math.abs(b.dataset.vocal-state.vocal)<.005&&Math.abs(b.dataset.music-state.music)<.005);
- $('key-down').disabled||=state.key<=-6;$('key-up').disabled||=state.key>=6;
- if(state.key!==before?.key)rollKey(state.key,before?state.key-before.key:0);
+ for(const b of document.querySelectorAll('.presets button'))b.setAttribute('aria-pressed',Math.abs(b.dataset.vocal-v.vocal)<.005&&Math.abs(b.dataset.music-v.music)<.005);
+ if(editingOwn())$('key-down').disabled=$('key-up').disabled=false;  // your key can be set before your song
+ $('key-down').disabled||=v.key<=-6;$('key-up').disabled||=v.key>=6;
+ if(v.key!==shownKey){rollKey(v.key,shownKey===null?0:v.key-shownKey);shownKey=v.key;}
  $('offset-value').textContent=`${state.offset>=0?'+':''}${state.offset.toFixed(1)}s`;
  for(const seg of SEGMENTED){
-  for(const b of seg.querySelectorAll('button')){b.setAttribute('aria-pressed',b.dataset.value===state[seg.dataset.action]);if(seg.dataset.action==='guide')b.hidden=!(state.guides||[]).includes(b.dataset.value);}
+  for(const b of seg.querySelectorAll('button')){b.setAttribute('aria-pressed',b.dataset.value===v[seg.dataset.action]);if(seg.dataset.action==='guide')b.hidden=!(state.guides||[]).includes(b.dataset.value);}
   if(document.body.classList.contains('sheet-open')||state.theme==='classic')placePill(seg);  // openSheet measures the rest; in Classic the settings are a page
  }
  syncRanges();
@@ -117,8 +126,8 @@ function rollKey(key,direction){
  }else old.remove();
  $('key-note').classList.toggle('orig',key===0);$('key-note').textContent=key===0?'Original key':`${Math.abs(key)} semitone${Math.abs(key)>1?'s':''} ${key>0?'higher':'lower'}`;
 }
-$('key-down').onclick=()=>{haptic(8);send({action:'key',value:state.key-1});};
-$('key-up').onclick=()=>{haptic(8);send({action:'key',value:state.key+1});};
+$('key-down').onclick=()=>{haptic(8);send({action:'key',value:view().key-1});};
+$('key-up').onclick=()=>{haptic(8);send({action:'key',value:view().key+1});};
 $('key-reset').onclick=()=>{send({action:'speed',value:1});send({action:'key',value:0});};
 for(const [id,action] of [['vocal','vocal'],['music','music'],['speed','speed'],['lyric-scale','lyric_scale']]){const sendValue=throttle(value=>send({action,value}));$(id).oninput=()=>sendValue(Number($(id).value));}
 // Presets set both sliders, gliding there so the change is visible; A cappella is the singer alone.
@@ -479,7 +488,7 @@ function showSinger(){$('singer-name').textContent=singer()||'—';}
 // Names are unique: the server lends a name to one phone (a random id kept here) until it's idle for 6 hours.
 const DEVICE='karaoke.device';let deviceMemo='';
 function deviceId(){try{let id=localStorage.getItem(DEVICE);if(!id){id=crypto.randomUUID?.()||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;localStorage.setItem(DEVICE,id);}return id;}catch{return deviceMemo||=`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;}}
-function setSinger(name){singerName=name;try{if(name)localStorage.setItem(SINGER,name);else localStorage.removeItem(SINGER);}catch{}showSinger();}
+function setSinger(name){singerName=name;try{if(name)localStorage.setItem(SINGER,name);else localStorage.removeItem(SINGER);}catch{}showSinger();if(state)showControls();}  // whose settings the sheet shows depends on the name
 async function claim(name){return api('/api/singer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,device:deviceId()})});}
 function askName(message=''){$('name-input').value=singer();$('name-error').textContent=message;$('name-error').hidden=!message;$('name-gate').hidden=false;setTimeout(()=>$('name-input').focus(),50);}
 $('name-form').onsubmit=async e=>{e.preventDefault();const name=$('name-input').value.split(/\s+/).filter(Boolean).join(' ').slice(0,40);if(!name)return;

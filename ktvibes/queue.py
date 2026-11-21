@@ -83,7 +83,7 @@ class State:
         """Lyrics are large and only the TV draws them, so broadcasts leave them out (see broadcast)."""
         brief = lambda item: item if lyrics or item is None else {k: v for k, v in item.items() if k != "lyrics"}
         return {"current": brief(self.current), "upcoming": [brief(i) for i in self.upcoming], "playing": self.playing,
-                "offset": self.offset, "vocal": self.vocal, "music": self.music, "guide": self.guide, "guides": self.guides(), "lyric_scale": self.lyric_scale, "video_mode": self.video_mode, "lyric_mode": self.lyric_mode, "theme": self.theme, "room_ends": self.room_ends, "time_up": self.time_up(), "speed": self.speed, "key": self.key, "seek_id": self.seek_id, "position": self.position,
+                "offset": self.offset, "vocal": self.vocal, "music": self.music, "guide": self.guide, "guides": self.guides(), "lyric_scale": self.lyric_scale, "video_mode": self.video_mode, "lyric_mode": self.lyric_mode, "theme": self.theme, "room_ends": self.room_ends, "time_up": self.time_up(), "profiles": self.profiles, "speed": self.speed, "key": self.key, "seek_id": self.seek_id, "position": self.position,
                 "transition_until": self.transition_until, "server_time": time.time(),
                 "player_connected": self.player is not None, "player_audio": self.player is not None and self.audio,
                 "revision": self.revision, "build": self.build}
@@ -263,8 +263,43 @@ class State:
         await self.broadcast()
         return item
 
+    def own_profile_edit(self, message):
+        """karaoke-server: each phone edits its own singer's profile. True when the sender is a named singer and the
+        stage isn't theirs (someone else's song, or nothing playing): then the change is saved for later and the room
+        is left alone. On their own song, or on a song without a name, changes apply live as usual."""
+        name = message.get("singer")
+        if not name or message.get("action") not in PROFILE:
+            return False
+        holder = self.singers.get(str(name).casefold())
+        if not holder or holder["device"] != message.get("device"):
+            raise ValueError("Your name needs a refresh: reload the remote")
+        on_stage = (self.current or {}).get("singer") or ""
+        return not self.current or (bool(on_stage) and on_stage.casefold() != str(name).casefold())
+
+    def setting(self, action, value):
+        """The checked value of one profile setting, with the same limits as the live controls."""
+        if action == "speed":
+            return round(max(0.5, min(1.5, number(value))), 2)
+        if action == "key":
+            return int(max(-6, min(6, round(number(value)))))
+        if action in ("vocal", "music"):
+            return max(0, min(1, number(value)))
+        if action == "lyric_scale":
+            return max(0.6, min(2.5, number(value)))
+        if value not in DISPLAY[action]:
+            raise ValueError(f"Unknown {action.replace('_', ' ')}")
+        return value
+
     async def control(self, message, sender=None):
         action = message.get("action")
+        if self.own_profile_edit(message):
+            key = str(message["singer"]).casefold()
+            # A first-timer's profile starts from the room as it is now.
+            profile = {**{n: getattr(self, n) for n in PROFILE}, **self.profiles.get(key, {})}
+            profile[action] = self.setting(action, message.get("value"))
+            self.profiles[key] = profile
+            await self.broadcast()
+            return
         if action in ("ended", "progress"):
             if sender is not self.player or not self.current or message.get("key") != self.current["key"]:
                 return
