@@ -594,3 +594,12 @@ addEventListener('resize',()=>{afterShown='';});
 // karaoke-server: how many phones have the remote open right now (a phone that closes its browser drops off until
 // it's back). Hidden when there are none.
 function showPhones(n){const pill=$('phones');pill.hidden=!n;if(n)pill.textContent=`👥 ${n}`;pill.title=`${n} phone${n===1?'':'s'} connected`;}
+
+// karaoke-server: the corner QR code is full size for the first 20 s of a song and on the countdown between songs,
+// then shrinks to a small dimmed tile for the rest of the song (still scannable up close). Late joiners can find
+// it; most of the time it stays out of the way.
+const QR_FULL_SECONDS=20;
+setInterval(()=>{
+ const playingLong=!!state?.current&&!document.body.classList.contains('between')&&music.currentTime>QR_FULL_SECONDS;
+ $('corner-join').classList.toggle('small',playingLong);
+},1000);
