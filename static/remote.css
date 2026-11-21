@@ -268,3 +268,5 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
 .name-error{margin:0;color:#ffaaa2;font-size:15px}
 /* karaoke-server: progress is display-only; songs can only be paused or skipped. */
 #scrub,#hero-bar{pointer-events:none;cursor:default}
+/* karaoke-server: no "Recent" list (Classic code may unhide the heading, so hide it for good). */
+#recent-heading,#recent{display:none!important}

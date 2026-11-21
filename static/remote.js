@@ -288,6 +288,7 @@ function endDrag(){
 // Rebuilt only when the list itself changes, so a just-tapped song keeps its added/failed icon.
 let readyKeys,recentShape;
 async function loadRecent(){
+ return;  // karaoke-server: no "Recent" list on the remote (the elements stay, hidden, for the Classic theme code)
  try{
   const songs=await api('/api/recent'),shape=songs.map(song=>song.id).join();
   if(shape===recentShape)return;
