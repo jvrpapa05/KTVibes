@@ -281,3 +281,7 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
 .fun-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
 .fun-btn{display:flex;align-items:center;justify-content:center;gap:.4em;padding:12px 10px;border-radius:999px;font-weight:700;font-size:15px;background:#ffffff0f;border:1px solid var(--line);color:var(--ink)}
 .fun-btn:active{transform:scale(.97)}
+/* karaoke-server: between songs the cheers and fun buttons sit in their own panel */
+.fun-idle{margin-top:16px;padding:16px;border-radius:22px;background:var(--panel);border:1px solid var(--line)}
+.fun-idle h2{font-size:15px;color:var(--muted);margin:0 0 12px;letter-spacing:.02em}
+.fun-idle .reactions{margin:0;border:0;padding:0}

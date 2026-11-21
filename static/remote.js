@@ -31,7 +31,7 @@ function render(next){
 }
 // Now playing: a card at the top, handing over to the dock once scrolled away.
 function showNow(first){
- const c=state.current,art=c?thumbnail(c.id):'';
+ const c=state.current,art=c?thumbnail(c.id):'';placeFun(!!c);
  showHero(!!c,first);$('hero').classList.toggle('paused',!state.playing);$('hero-state').textContent=(state.playing?'NOW SINGING':'PAUSED')+(c?.singer?` · ${c.singer.toUpperCase()}`:'');
  for(const id of ['hero-play','dock-play']){$(id).classList.toggle('playing',!!(c&&state.playing));$(id).setAttribute('aria-label',state.playing?'Pause':'Play');$(id).disabled=!c;}
  // The card keeps its last song while it folds away.
@@ -555,3 +555,14 @@ $('photo-input').onchange=async()=>{
  }catch(error){toast(error.message,undefined,'err');}
  finally{$('photo-open').disabled=false;}
 };
+
+// karaoke-server: the cheers, Shout-out and Photo live in the Now singing card while a song plays. Between songs
+// that card folds away, so they move into their own little panel and keep working; they move back on the next song.
+const FUN_ROWS=[document.querySelector('.reactions'),$('photo-input').parentElement];  // emoji row, Shout-out/Photo row
+// A bookmark (empty comment) marks each row's home in the card, so it can go back exactly there.
+const funHome=FUN_ROWS.map(row=>{const mark=document.createComment('fun-row home');row.before(mark);return mark;});
+function placeFun(playing){
+ const idle=$('fun-idle');idle.hidden=playing;
+ if(playing)FUN_ROWS.forEach((row,i)=>{if(funHome[i].nextSibling!==row)funHome[i].after(row);});
+ else FUN_ROWS.forEach(row=>{if(row.parentElement!==idle)idle.append(row);});
+}

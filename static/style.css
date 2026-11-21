@@ -175,3 +175,5 @@ body.still :is(.tv-tools,.tv-bottom,.open-remote){opacity:0;pointer-events:none}
 .polaroid img{display:block;width:100%;max-height:30vh;object-fit:cover;border-radius:2px;background:#ddd}
 .polaroid figcaption{padding:.6vw 0 .8vw;text-align:center;font:700 calc(clamp(16px,1.5vw,28px)*var(--ui,1))/1.2 'Space Grotesk',sans-serif;color:#222}
 @keyframes polaroid-in{from{opacity:0;transform:translate(var(--from-x,0),75vh) rotate(var(--spin,30deg)) scale(.55)}70%{opacity:1}to{opacity:1;transform:rotate(var(--tilt,-3deg))}}
+/* karaoke-server: between songs the join QR code is centre stage: shout-outs go to the very top */
+.tv:has(#idle:not([hidden])) .fun-stack{top:3vh}

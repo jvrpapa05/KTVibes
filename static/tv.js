@@ -503,7 +503,10 @@ function showPhoto(e){
  // readable), a random tilt, flying in from below with a spin. Up to PHOTO_PILE stay up at once.
  const card=el('figure',undefined,'polaroid');card.dataset.id=e.id;
  const image=el('img');image.alt='';image.src=`/api/photo/${encodeURIComponent(e.photo)}`;
- card.style.left=`${(3+Math.random()*76).toFixed(1)}vw`;card.style.top=`${(5+Math.random()*26).toFixed(1)}vh`;
+ // Between songs the join QR code fills the middle, so photos land in the side areas instead.
+ const idle=!state?.current,side=Math.random()<.5;
+ card.style.left=`${(idle?(side?2+Math.random()*14:66+Math.random()*14):3+Math.random()*76).toFixed(1)}vw`;
+ card.style.top=`${(idle?8+Math.random()*50:5+Math.random()*26).toFixed(1)}vh`;
  card.style.setProperty('--tilt',`${(Math.random()*30-15).toFixed(1)}deg`);
  card.style.setProperty('--from-x',`${((Math.random()<.5?-1:1)*(25+Math.random()*35)).toFixed(0)}vw`);
  card.style.setProperty('--spin',`${(Math.random()*120-60).toFixed(0)}deg`);
