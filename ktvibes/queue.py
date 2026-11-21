@@ -8,7 +8,7 @@ import time
 import uuid
 from . import songbook
 
-DISPLAY = {"video_mode": ("show", "blur", "hide"), "lyric_mode": ("two", "scroll", "off"), "theme": ("default", "classic")}
+DISPLAY = {"video_mode": ("show", "blur", "hide"), "lyric_mode": ("two", "scroll", "off"), "theme": ("default",)}  # karaoke-server: Classic theme removed (English-only users)
 def following(options, current):
     """The option after `current`, wrapping round: what a "cycle" control switches to."""
     return options[(options.index(current) + 1) % len(options)]
@@ -40,7 +40,7 @@ class State:
         self.offset = 0.0
         self.vocal = 0.1
         self.music = 1.0  # instrumental (backing track) volume
-        self.guide = "latin"  # off | latin | hangul, shown above the lyrics
+        self.guide = "off"  # karaoke-server: pronunciation guides removed (English-only users); always off
         self.lyric_scale = 1.5
         self.video_mode = "show"  # show | blur | hide: blur suits lyric videos, whose own lyrics clash
         self.lyric_mode = "two"  # two (classic two-line KTV) | scroll | off
@@ -64,6 +64,7 @@ class State:
 
     def guides(self):
         """Guide modes with something to show for the current song (all of them when idle)."""
+        return ["off"]  # karaoke-server: English-only users, no pronunciation guides
         units = [u for line in (self.current or {}).get("lyrics", []) for u in line.get("units") or []]
         if not self.current:
             return list(GUIDES)
@@ -305,6 +306,7 @@ class State:
         elif action == "key":
             self.key = int(max(-6, min(6, round(number(message["value"])))))
         elif action == "guide":
+            return  # karaoke-server: guides are always off; ignore (TVs may still restore an old saved guide)
             modes = self.guides()
             if message.get("value") == "cycle":
                 # From a mode this song lacks, jump to its first visible guide rather than "off".

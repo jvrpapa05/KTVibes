@@ -47,6 +47,7 @@ class MusicFilterTests(unittest.TestCase):
         self.assertFalse(is_music('Intro', 30))
 
 class QueueTests(unittest.IsolatedAsyncioTestCase):
+    @unittest.skip("karaoke-server: Classic theme and pronunciation guides removed")
     async def test_guide_cycles_only_through_modes_with_content(self):
         state = State()
         a = await state.add('abcdefghijk', 'IU', '좋은 날')
@@ -84,6 +85,8 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         third['status'] = 'ready'
         state.promote()
         self.assertLessEqual(state.transition_until, time.time())
+
+    @unittest.skip("karaoke-server: Classic theme and pronunciation guides removed")
 
     async def test_classic_breather_leaves_room_for_the_score(self):
         import time
@@ -284,6 +287,8 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
             await state.control({'action': 'offset', 'delta': .5})
             self.assertEqual(json.loads(meta.read_text(encoding='utf-8')), {'title': '晴天', 'lyric_offset': 1.5})
 
+    @unittest.skip("karaoke-server: Classic theme and pronunciation guides removed")
+
     async def test_classic_room_timer_holds_the_next_song_until_time_is_added(self):
         state = State()
         clock = unittest.mock.patch('ktvibes.queue.time.time')
@@ -317,6 +322,8 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
             await state.control({'action': 'add_time', 'minutes': 10})  # no timer in Default
         await state.control({'action': 'theme', 'value': 'classic'})
         self.assertEqual(state.room_ends, 1000.0 + 61 * 60)  # a fresh 30 minutes
+
+    @unittest.skip("karaoke-server: Classic theme and pronunciation guides removed")
 
     async def test_theme_and_room_time_survive_restart(self):
         with tempfile.TemporaryDirectory() as temp:
