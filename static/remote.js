@@ -25,7 +25,7 @@ let skew=0;  // server clock minus ours, for the progress estimate
 function render(next){
  const before=state;state=next;state.received=Date.now()/1000;if(state.server_time)skew=state.server_time-state.received;
  // The header pill reports the TV, since that decides whether anything can play.
- $('connection').textContent=!state.player_connected?'Open /tv on a device':state.player_audio?'Device ready':'Tap Enable sound on the device';$('connection').classList.toggle('warn',!state.player_audio);$('connection').classList.toggle('off',!state.player_connected);
+ $('connection').textContent=!state.player_connected?'TV not connected':state.player_audio?'TV ready':'TV connected · tap Enable sound on it';  // karaoke-server: says it's about the TV, not this phone$('connection').classList.toggle('warn',!state.player_audio);$('connection').classList.toggle('off',!state.player_connected);
  document.body.dataset.theme=state.theme||'default';showNow(!before);showControls(before);showQueue(before);showClassic();classicUi?.render(state);
  const ready=[state.current,...state.upcoming].filter(i=>i?.status==='ready').map(i=>i.key).join();
  if(ready!==readyKeys){readyKeys=ready;loadRecent();classicUi?.loadBook();}
