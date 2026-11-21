@@ -543,17 +543,29 @@ async function shrinkPhoto(file){
  for(const quality of [0.8,0.65,0.5]){const blob=await new Promise(r=>canvas.toBlob(r,'image/jpeg',quality));if(blob&&blob.size<=600000)return blob;}
  throw new Error('That photo is too big');
 }
-$('photo-open').onclick=()=>{if(!singer())return askName();$('photo-input').value='';$('photo-input').click();};
+$('photo-open').onclick=()=>{if(!singer())return askName();$('photo-input').value='';$('photo-input').click();};  // pick one or several
+// Several photos can be picked at once: they go one by one, spaced to the server's per-phone photo cooldown, and
+// pile up on the TV. At most PHOTO_BATCH per pick, the number the TV shows at once.
+const PHOTO_BATCH=6,PHOTO_GAP=3200;
+async function sendPhoto(file){
+ const blob=await shrinkPhoto(file);
+ const r=await fetch('/api/photo',{method:'POST',headers:{'Content-Type':'image/jpeg','X-Singer':encodeURIComponent(singer()),'X-Device':deviceId()},body:blob});
+ if(!r.ok){let m=`Couldn't send (${r.status})`;try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+}
 $('photo-input').onchange=async()=>{
- const file=$('photo-input').files?.[0];if(!file)return;
- $('photo-open').disabled=true;toast('Sending photo…');
+ const files=[...($('photo-input').files||[])];if(!files.length)return;
+ const batch=files.slice(0,PHOTO_BATCH);
+ $('photo-open').disabled=true;let sent=0,failed=0;
  try{
-  const blob=await shrinkPhoto(file);
-  const r=await fetch('/api/photo',{method:'POST',headers:{'Content-Type':'image/jpeg','X-Singer':encodeURIComponent(singer()),'X-Device':deviceId()},body:blob});
-  if(!r.ok){let m=`Couldn't send (${r.status})`;try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
-  haptic([10,30,10]);
- }catch(error){toast(error.message,undefined,'err');}
- finally{$('photo-open').disabled=false;}
+  // Progress shows before each photo; the TV's "Photo from … [Hide]" notice arrives after it, so the last
+  // photo can always be hidden. Only a failure gets a closing message.
+  for(const [i,file] of batch.entries()){
+   if(i)await new Promise(r=>setTimeout(r,PHOTO_GAP));
+   toast(files.length>PHOTO_BATCH&&!i?`Sending the first ${PHOTO_BATCH} of ${files.length} photos…`:batch.length>1?`Sending photo ${i+1} of ${batch.length}…`:'Sending photo…');
+   try{await sendPhoto(file);sent++;haptic(10);}catch(error){failed++;toast(error.message,undefined,'err');}
+  }
+  if(failed)toast(`${sent} of ${batch.length} photos sent`,undefined,'err');
+ }finally{$('photo-open').disabled=false;$('photo-input').value='';}
 };
 
 // karaoke-server: the cheers, Shout-out and Photo live in the Now singing card while a song plays. Between songs
