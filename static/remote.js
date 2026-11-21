@@ -413,7 +413,8 @@ async function pickLyrics(song){
     const b=el('button',undefined,'lyric-option'+(o.current?' current':'')),top=el('div');
     const gap=Math.abs(o.difference)>10?` · ${Math.abs(o.difference)}s ${o.difference>0?'longer':'shorter'} than this video`:'';
     const lines=el('span',undefined,'cnt classic-only'),figure=el('span',String(o.lines),'lcd');figure.dataset.ghost='88';lines.append(figure,'LINES',...(gap?[el('span',gap.slice(3),'gap')]:[]));
-    top.append(el('b',lang||o.track||'Lyrics'),el('span',(lang?[o.track,o.artist,o.album]:[o.artist,o.album]).filter(Boolean).join(' · ')),...(o.current?[el('em','In use')]:[]),lines);
+    // karaoke-server: "Lines up" = its timing is for a recording as long as this video
+    top.append(el('b',lang||o.track||'Lyrics'),el('span',(lang?[o.track,o.artist,o.album]:[o.artist,o.album]).filter(Boolean).join(' · ')),...(o.current?[el('em','In use')]:[]),...(o.fits?[el('em','✓ Lines up','fits')]:[]),lines);
     b.append(top,...o.preview.map(line=>el('small',line)),el('small',`${o.lines} lines${gap}`,'count'));
     b.onclick=()=>applyLyrics(o,b);
     if(query||first||o.current)list.append(b);else extra.push(b);

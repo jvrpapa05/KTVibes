@@ -483,7 +483,9 @@ async def search(query: str, duration: float) -> list[dict]:
         response = await client.get("/api/search", params={"q": query})
         response.raise_for_status()
     synced = [c for c in response.json() if STAMP.search(c.get("syncedLyrics") or "")]
-    return sorted(synced, key=lambda c: abs(float(c.get("duration") or 0) - duration))[:20]
+    real_lengths(synced)  # karaoke-server: compare by the length the timing really fits, not the label
+    synced = [c for c in synced if c.get("length")]
+    return sorted(synced, key=lambda c: abs(c["length"] - duration))[:20]
 
 async def record(record_id: int) -> dict | None:
     """One LRCLIB record by id, as listed by candidates() or search()."""

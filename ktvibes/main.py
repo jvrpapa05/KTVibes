@@ -233,7 +233,11 @@ async def lyric_options(video_id: str, q: str = Query("", max_length=200)):
         options.append({"id": c.get("id"), "track": c.get("trackName"), "artist": c.get("artistName"), "album": c.get("albumName"),
                         "language": lyrics.LANGUAGES[lyrics.script(raw)], "lines": len(lines), "preview": lines[:2], "current": raw == current,
                         # seconds longer (+) or shorter than this song: a big gap usually means another version
-                        "difference": round(float(c.get("duration") or 0) - meta["duration"])})
+                        # (karaoke-server: by the length its timing really fits, see lyrics.real_lengths)
+                        "difference": round(float(c.get("length") or c.get("duration") or 0) - meta["duration"]),
+                        "fits": abs(float(c.get("length") or 0) - meta["duration"]) <= youtube.LYRICS_TOLERANCE})
+    # karaoke-server: versions that line up with this video first (the in-use one keeps its place among them)
+    options.sort(key=lambda o: not o["fits"])
     return options
 
 class LyricChoice(BaseModel):
