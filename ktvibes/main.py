@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnec
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
-from .queue import State
+from .queue import State, VERSION
 from . import lyrics, songbook, stems, worker, youtube
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -266,7 +266,7 @@ def remote_url():
 
 @app.get("/api/config")
 async def config():
-    return {"remote_url": remote_url()}
+    return {"remote_url": remote_url(), "version": VERSION}  # karaoke-server: version too
 
 @app.get("/api/qr.svg")
 async def qr():

@@ -157,3 +157,5 @@ body.still :is(.tv-tools,.tv-bottom,.open-remote){opacity:0;pointer-events:none}
 .tv #now-card #song-singer{flex:0 0 auto;margin:0;font:700 1em/1.2 'Space Grotesk',sans-serif;color:var(--lime);text-shadow:0 2px 6px #000}
 .tv #now-card #song-singer::before{content:'· '}
 #on-deck .deck-singer{font-style:normal;color:var(--lime)}
+/* karaoke-server: version, there when you look for it. */
+.app-version{position:fixed;right:10px;bottom:6px;z-index:1;font-size:11px;color:#fff;opacity:.22;letter-spacing:.04em;pointer-events:none;text-shadow:0 1px 2px #000}

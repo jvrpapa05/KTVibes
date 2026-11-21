@@ -270,3 +270,5 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
 #scrub,#hero-bar{pointer-events:none;cursor:default}
 /* karaoke-server: no "Recent" list (Classic code may unhide the heading, so hide it for good). */
 #recent-heading,#recent{display:none!important}
+/* karaoke-server: version, there when you look for it. */
+.app-version{margin:18px 0 4px;text-align:center;font-size:11px;color:var(--muted);opacity:.5;letter-spacing:.04em}

@@ -15,6 +15,9 @@ def following(options, current):
 
 GUIDES = ("off", "latin", "jyutping", "hangul")
 REACTIONS = ("👏", "🔥", "🎉", "💚")  # cheers a remote can float up on the TV
+# karaoke-server: our own SemVer, hand-maintained in ktvibes/VERSION and bumped with every change (upstream's
+# version in pyproject.toml is left alone so merges stay clean). Shown faintly on the TV and the remote.
+VERSION = (Path(__file__).with_name("VERSION").read_text(encoding="utf-8").strip() if Path(__file__).with_name("VERSION").is_file() else "dev")
 SINGER_IDLE = 6 * 3600  # karaoke-server: a singer name is freed after 6 idle hours
 # karaoke-server: every room setting a singer can set is part of their profile. Not the song position, and not the
 # lyric timing nudge (offset): that corrects the song itself and is kept per song in meta.json.
@@ -86,7 +89,7 @@ class State:
                 "offset": self.offset, "vocal": self.vocal, "music": self.music, "guide": self.guide, "guides": self.guides(), "lyric_scale": self.lyric_scale, "video_mode": self.video_mode, "lyric_mode": self.lyric_mode, "theme": self.theme, "room_ends": self.room_ends, "time_up": self.time_up(), "profiles": self.profiles, "speed": self.speed, "key": self.key, "seek_id": self.seek_id, "position": self.position,
                 "transition_until": self.transition_until, "server_time": time.time(),
                 "player_connected": self.player is not None, "player_audio": self.player is not None and self.audio,
-                "revision": self.revision, "build": self.build}
+                "revision": self.revision, "build": self.build, "version": VERSION}
 
     def restore(self, path: Path, seed=lambda: {}):
         """Reload the saved queue; songs are prepared again (fast from cache) and the current one resumes."""

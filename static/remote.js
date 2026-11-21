@@ -93,6 +93,7 @@ for(const button of document.querySelectorAll('.react'))button.onclick=()=>{
 // Controls sheet: mix, key, speed, TV display and lyric fixes.
 let shownKey=null;
 function showControls(before){
+ if(state.version)$('app-version').textContent=`v${state.version}`;
  const v=view();$('sheet-scope').textContent=editingOwn()?`Your settings · used when ${singer()}'s songs play`:'Changes show on the device';
  for(const id of ['skip','earlier','later','lyric-version','scrub','key-down','key-up'])$(id).disabled=!state.current;
  $('scrub').max=state.current?.duration||1;

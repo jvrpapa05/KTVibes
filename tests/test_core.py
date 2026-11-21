@@ -247,6 +247,13 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
             await state.control({'action': 'vocal', 'value': 0.9, 'singer': 'Vince', 'device': 'phone-pc'})
         self.assertEqual(state.profiles['vince']['vocal'], 0.2)
 
+    def test_version_is_semver_and_broadcast(self):
+        # karaoke-server: ktvibes/VERSION is our SemVer, sent with the state so the TV and remotes can show it.
+        import re
+        from ktvibes.queue import VERSION
+        self.assertRegex(VERSION, r'^\d+\.\d+\.\d+$')
+        self.assertEqual(State().snapshot()['version'], VERSION)
+
     def test_singer_names_are_unique_per_phone_until_idle(self):
         state = State()
         self.assertEqual(state.claim_singer('  Anna ', 'phone-1'), 'Anna')
