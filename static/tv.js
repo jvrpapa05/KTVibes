@@ -64,10 +64,11 @@ function render(next){
  // and start scrolling the new rows straight away.
  const deck=JSON.stringify([queued.length,...queued.slice(0,3).map(i=>[i.singer,i.title,i.artist,i.status==='ready'?'':'prep'])]);  // the % updates in place (deckPercents)
  if(deck!==deckShown){deckShown=deck;
- $('on-deck').replaceChildren(...queued.slice(0,3).map(i=>{const row=el('li');row.append(...(i.singer?[el('em',`${i.singer}: `,'deck-singer')]:[]),el('b',i.title),el('span',` ${i.artist}`),...(i.status==='ready'?[]:[(()=>{const pct=el('small',` ${prepPercent(i,serverSkew)}%`,'deck-pct');pct.dataset.key=i.key;return pct;})()]));return row;}));
+ // The number and the % stay put; only the text between them scrolls (clipped, never behind the number).
+ $('on-deck').replaceChildren(...queued.slice(0,3).map((i,n)=>{const row=el('li'),text=el('span',undefined,'deck-text');text.append(...(i.singer?[el('em',`${i.singer}: `,'deck-singer')]:[]),el('b',i.title),el('span',` ${i.artist}`));row.append(el('span',`${n+1}.`,'deck-num'),text,...(i.status==='ready'?[]:[(()=>{const pct=el('small',`${prepPercent(i,serverSkew)}%`,'deck-pct');pct.dataset.key=i.key;return pct;})()]));return row;}));
  if(queued.length>3)$('on-deck').append(el('li',`+${queued.length-3} more`,'more'));
  if(!queued.length)$('on-deck').append(el('li','Nothing queued','more'));
- marquees('#on-deck li:not(.more)');}
+ marquees('#on-deck .deck-text');}
  // The two songs after the next one peek out from under its card between songs.
  [1,2].forEach(n=>{const item=queued[n-1],peek=$(`peek-${n}`),line=el('span');peek.hidden=!item;if(item){line.append(el('b',String(n+1)),`${item.title} · ${item.artist}`);peek.replaceChildren(line);}});
  showPrep(queued);showBoard(state,queued);setAmbient(!state.current);
@@ -530,10 +531,10 @@ function showPhoto(e){
 function hideFun(id){for(const node of document.querySelectorAll('.shout,.polaroid'))if(node.dataset.id===id){node.classList.add('out');setTimeout(()=>node.remove(),600);}}
 
 // karaoke-server: long titles scroll: the now-playing title/artist at the top and the Up next list.
-const TV_MARQUEES='#song-title,#song-artist,#on-deck li:not(.more)';
+const TV_MARQUEES='#song-title,#song-artist,#on-deck .deck-text';
 setInterval(()=>marquees(TV_MARQUEES),1500);addEventListener('resize',()=>marquees(TV_MARQUEES));
 
 // karaoke-server: tick the preparation percentages once a second (Up next rows in place, and the idle headline).
 setInterval(()=>{if(!state)return;
- for(const small of document.querySelectorAll('#on-deck .deck-pct')){const item=state.upcoming.find(i=>i.key===small.dataset.key);if(item)small.textContent=` ${prepPercent(item,serverSkew)}%`;}
+ for(const small of document.querySelectorAll('#on-deck .deck-pct')){const item=state.upcoming.find(i=>i.key===small.dataset.key);if(item)small.textContent=`${prepPercent(item,serverSkew)}%`;}
  showPrep(state.upcoming.filter(i=>i.status!=='error'));},1000);

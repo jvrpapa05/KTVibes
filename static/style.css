@@ -186,3 +186,11 @@ body.still :is(.tv-tools,.tv-bottom,.open-remote){opacity:0;pointer-events:none}
 .osd-art{flex:none;width:64px;height:64px;border-radius:18px;object-fit:cover;box-shadow:0 6px 18px #0008}
 .osd.has-art .osd-icon{position:absolute;left:58px;top:50%;width:28px;height:28px;margin-top:6px;border-radius:50%;font-size:15px;box-shadow:0 0 0 3px #202a1c}
 .osd.has-art .osd-text{margin-left:4px}
+/* karaoke-server: Up next rows: the number and % hold still, only the text between them scrolls */
+#on-deck li:not(.more){display:flex;align-items:baseline;gap:.35em;text-overflow:clip}
+#on-deck li:not(.more):before{content:none}
+#on-deck .deck-num{flex:none;color:var(--lime)}
+#on-deck .deck-text{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#on-deck .deck-pct{flex:none}
+/* the % keeps one width (9% -> 10% -> 100%), so the right-aligned row never shifts as it ticks */
+#on-deck .deck-pct{min-width:4ch;text-align:right;font-variant-numeric:tabular-nums}
