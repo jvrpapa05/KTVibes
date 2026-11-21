@@ -487,10 +487,13 @@ addEventListener('resize',scaleUi);scaleUi();
 
 // karaoke-server: fun extras from the phones. Shout-outs slide in bottom-left; photos pop up top-right as a
 // polaroid. Both carry the sender's name, leave on their own, and any phone can hide them early.
+const SHOUT_COLORS=['linear-gradient(120deg,#d7fc70,#f6e05e 45%,#ff7ab6)','linear-gradient(120deg,#7af0ff,#b39cff 50%,#ff7ab6)','linear-gradient(120deg,#ffd166,#ff9f68 50%,#d7fc70)'];
 const funStack=el('div',undefined,'fun-stack');document.body.append(funStack);
 function leave(node,after){setTimeout(()=>{node.classList.add('out');setTimeout(()=>node.remove(),600);},after);}
 function showShout(e){
- const node=el('div',undefined,'shout');node.dataset.id=e.id;node.append(el('b',e.name),el('span',e.text));
+ const node=el('div',undefined,'shout');node.dataset.id=e.id;node.append(el('b',`${e.name} says`),el('span',e.text));
+ node.style.setProperty('--tilt',`${(Math.random()*6-3).toFixed(1)}deg`);
+ node.style.setProperty('--shout-bg',SHOUT_COLORS[Math.floor(Math.random()*SHOUT_COLORS.length)]);
  funStack.append(node);while(funStack.children.length>3)funStack.firstChild.remove();
  leave(node,REDUCED.matches?5000:6500);
 }

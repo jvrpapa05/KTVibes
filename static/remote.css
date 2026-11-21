@@ -277,3 +277,7 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
 /* karaoke-server: shout-out box */
 .shout-count{margin:-6px 0 0;text-align:right;font-size:12px;color:var(--muted)}
 .name-card .shout-cancel{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:500;padding:12px}
+/* karaoke-server: shout-out and photo get their own row, as labelled actions (not more emojis) */
+.fun-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.fun-btn{display:flex;align-items:center;justify-content:center;gap:.4em;padding:12px 10px;border-radius:999px;font-weight:700;font-size:15px;background:#ffffff0f;border:1px solid var(--line);color:var(--ink)}
+.fun-btn:active{transform:scale(.97)}
