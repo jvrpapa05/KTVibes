@@ -300,3 +300,6 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
 .emoji-mine{display:flex;flex-wrap:wrap;justify-content:center;gap:8px}
 .emoji-chip{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;font-size:22px;background:#ffffff12;border:1px solid var(--line)}
 .emoji-chip b{font-size:14px;color:var(--muted)}
+/* karaoke-server: the song you just added, briefly highlighted in the queue */
+.row.just-added{animation:just-added 2.4s ease-out}
+@keyframes just-added{0%,25%{background:#d7fc7033;box-shadow:inset 3px 0 0 var(--lime)}100%{background:transparent;box-shadow:inset 3px 0 0 transparent}}

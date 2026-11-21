@@ -316,7 +316,8 @@ function showResult(song,list=$('results'),wrap=row=>row,index=-1){
   // A swipe ends in a click; an open row closes on tap instead of queueing.
   if(b.dataset.dragged){delete b.dataset.dragged;return;}if(b.parentElement?.classList.contains('open')){closeSwipe();return;}
   b.disabled=true;
-  try{await enqueue({id:song.id,...song.parsed});icon(status,'added');mark('added',el('em','예약됨'),' · added');haptic([10,40,10]);flyToQueue(image);toast(`Added ${song.parsed.title}`);}
+  try{const added=await enqueue({id:song.id,...song.parsed});icon(status,'added');mark('added',el('em','예약됨'),' · added');haptic([10,40,10]);flyToQueue(image);toast(`Added ${song.parsed.title}`);
+   if(list===$('results'))setTimeout(()=>leaveSearch(added?.key),450);}
   catch(error){icon(status,'failed');mark('failed',"Couldn't add. Try again");toast(error.message,undefined,'err');}finally{b.disabled=false;}
  };
  list.append(wrap(b));
@@ -627,3 +628,16 @@ $('emoji-form').onsubmit=e=>{e.preventDefault();
  if(list.length>=EMOJI_MAX)return emojiError(`Up to ${EMOJI_MAX}: remove one first (tap it above)`);
  saveEmoji([...list,emoji]);$('emoji-input').value='';emojiError('');haptic(8);};
 showMyEmoji();
+
+// karaoke-server: after a song is added from search, leave the search (results and box cleared, keyboard closed)
+// and show where it landed: scroll to its queue row and give it a short highlight.
+function leaveSearch(key){
+ $('query').value='';$('query').blur();$('clear').hidden=true;searchRun++;suggestRun++;
+ $('results').replaceChildren();$('more').hidden=$('results-end').hidden=true;$('suggestions').hidden=true;$('query').setAttribute('aria-expanded','false');
+ let tries=0;
+ const find=()=>{const row=key&&$('queue').querySelector(`[data-key="${CSS.escape(key)}"]`);
+  if(!row){if(++tries<20)setTimeout(find,100);return;}
+  row.scrollIntoView({behavior:REDUCED.matches?'auto':'smooth',block:'center'});
+  row.classList.remove('just-added');void row.offsetWidth;row.classList.add('just-added');setTimeout(()=>row.classList.remove('just-added'),2600);};
+ find();
+}
