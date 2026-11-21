@@ -488,6 +488,7 @@ addEventListener('resize',scaleUi);scaleUi();
 // karaoke-server: fun extras from the phones. Shout-outs slide in bottom-left; photos pop up top-right as a
 // polaroid. Both carry the sender's name, leave on their own, and any phone can hide them early.
 const SHOUT_COLORS=['linear-gradient(120deg,#d7fc70,#f6e05e 45%,#ff7ab6)','linear-gradient(120deg,#7af0ff,#b39cff 50%,#ff7ab6)','linear-gradient(120deg,#ffd166,#ff9f68 50%,#d7fc70)'];
+const PHOTO_PILE=6;  // photos on screen at once; the oldest drifts off
 const funStack=el('div',undefined,'fun-stack');document.body.append(funStack);
 function leave(node,after){setTimeout(()=>{node.classList.add('out');setTimeout(()=>node.remove(),600);},after);}
 function showShout(e){
@@ -498,10 +499,20 @@ function showShout(e){
  leave(node,REDUCED.matches?5000:6500);
 }
 function showPhoto(e){
+ // Thrown onto the screen like a polaroid on a table: a random spot in the upper part (the lyrics below stay
+ // readable), a random tilt, flying in from below with a spin. Up to PHOTO_PILE stay up at once.
  const card=el('figure',undefined,'polaroid');card.dataset.id=e.id;
  const image=el('img');image.alt='';image.src=`/api/photo/${encodeURIComponent(e.photo)}`;
- card.style.setProperty('--tilt',`${(Math.random()*8-4).toFixed(1)}deg`);
+ card.style.left=`${(3+Math.random()*76).toFixed(1)}vw`;card.style.top=`${(5+Math.random()*26).toFixed(1)}vh`;
+ card.style.setProperty('--tilt',`${(Math.random()*30-15).toFixed(1)}deg`);
+ card.style.setProperty('--from-x',`${((Math.random()<.5?-1:1)*(25+Math.random()*35)).toFixed(0)}vw`);
+ card.style.setProperty('--spin',`${(Math.random()*120-60).toFixed(0)}deg`);
  card.append(image,el('figcaption',`📷 ${e.name}`));
- image.onload=()=>{for(const old of document.querySelectorAll('.polaroid:not(.out)'))old.classList.add('out');document.body.append(card);leave(card,8000);};
+ image.onload=()=>{
+  document.body.append(card);
+  const pile=[...document.querySelectorAll('.polaroid:not(.out)')];
+  for(const old of pile.slice(0,Math.max(0,pile.length-PHOTO_PILE))){old.classList.add('out');setTimeout(()=>old.remove(),600);}
+  leave(card,12000);  // long enough for a burst to pile up
+ };
 }
 function hideFun(id){for(const node of document.querySelectorAll('.shout,.polaroid'))if(node.dataset.id===id){node.classList.add('out');setTimeout(()=>node.remove(),600);}}

@@ -271,14 +271,17 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(ws == 'remote-1' and m == {'type': 'fun', 'kind': 'shout', 'id': shout['id'], 'name': 'Vince'} for ws, m in sent))
         with self.assertRaisesRegex(ValueError, 'Wait'):
             await state.control({'action': 'shout', 'value': 'again', 'singer': 'Vince', 'device': 'phone-v'})
-        state.fun_last['phone-v'] -= q.FUN_COOLDOWN
-        item = await state.add_photo(b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
+        item = await state.add_photo(  # photos have their own cooldown, so one goes straight after a shout-out
+b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         self.assertIn(item['photo'], state.photos)
         self.assertEqual(state.photos[item['photo']]['name'], 'Vince')
-        state.fun_last['phone-v'] -= q.FUN_COOLDOWN
+        with self.assertRaisesRegex(ValueError, 'Wait'):                 # but not two photos within 3 s
+            await state.add_photo(b'\xff\xd8\xff2', 'image/jpeg', 'Vince', 'phone-v')
+        state.fun_last['photo:phone-v'] -= q.PHOTO_COOLDOWN
         with self.assertRaisesRegex(ValueError, 'too big'):
             await state.add_photo(b'0' * (q.PHOTO_MAX_BYTES + 1), 'image/jpeg', 'Vince', 'phone-v')
         state.photos[item['photo']]['at'] -= q.PHOTO_KEEP + 1          # the night is over: pruned on the next photo
+        state.fun_last['photo:phone-v'] -= q.PHOTO_COOLDOWN
         await state.add_photo(b'\xff\xd8\xff1', 'image/jpeg', 'Vince', 'phone-v')
         self.assertNotIn(item['photo'], state.photos)
         await state.control({'action': 'hide', 'id': shout['id']})

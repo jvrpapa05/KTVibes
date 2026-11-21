@@ -16,7 +16,8 @@ def following(options, current):
 GUIDES = ("off", "latin", "jyutping", "hangul")
 REACTIONS = ("👏", "🔥", "🎉", "💚")  # cheers a remote can float up on the TV
 # karaoke-server: shout-outs (short text) and photos that pop up on the TV, always with the sender's singer name.
-FUN_COOLDOWN = 10  # seconds between shout-outs/photos from one phone
+FUN_COOLDOWN = 10  # seconds between shout-outs from one phone
+PHOTO_COOLDOWN = 3  # seconds between photos from one phone: a burst of photos piles up on the TV
 SHOUT_MAX = 60  # characters
 PHOTO_MAX_BYTES = 1_000_000  # phones shrink photos to ~150 KB before sending
 PHOTO_KEEP = 12 * 3600  # photos live in memory only, for the night
@@ -309,12 +310,14 @@ class State:
         holder["seen"] = time.time()
         return holder["name"]
 
-    def fun_allowed(self, device):
+    def fun_allowed(self, device, kind="shout"):
+        """One shout-out per FUN_COOLDOWN and one photo per PHOTO_COOLDOWN, per phone (counted separately)."""
         now = time.time()
-        wait = FUN_COOLDOWN - (now - self.fun_last.get(device, 0))
+        key = f"{kind}:{device}"
+        wait = (PHOTO_COOLDOWN if kind == "photo" else FUN_COOLDOWN) - (now - self.fun_last.get(key, 0))
         if wait > 0:
             raise ValueError(f"Wait {int(wait) + 1} s before sending another")
-        self.fun_last[device] = now
+        self.fun_last[key] = now
 
     async def show_fun(self, kind, name, **extra):
         """Pop a shout-out or photo up on the TV, and let every remote offer to hide it."""
@@ -329,7 +332,7 @@ class State:
         name = self.sender_name(singer, device)
         if len(data) > PHOTO_MAX_BYTES:
             raise ValueError("That photo is too big")
-        self.fun_allowed(device)
+        self.fun_allowed(device, "photo")
         now = time.time()
         self.photos = {k: v for k, v in self.photos.items() if now - v["at"] < PHOTO_KEEP}
         while len(self.photos) >= PHOTO_LIMIT:
@@ -345,7 +348,7 @@ class State:
             text = " ".join(str(message.get("value") or "").split())[:SHOUT_MAX]
             if not text:
                 raise ValueError("Type a message")
-            self.fun_allowed(message.get("device"))
+            self.fun_allowed(message.get("device"), "shout")
             await self.show_fun("shout", name, text=text)
             return
         if action == "hide":
