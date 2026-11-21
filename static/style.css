@@ -210,3 +210,19 @@ body.still :is(.tv-tools,.tv-bottom,.open-remote){opacity:0;pointer-events:none}
 .tv #now-card #song-artist{min-width:0;font:500 clamp(15px,1.25vw,24px)/1.2 'Space Grotesk',sans-serif;color:#fffb;text-shadow:none}
 .tv #now-card #song-singer{font:700 clamp(14px,1.15vw,22px)/1.2 'Space Grotesk',sans-serif;color:var(--lime);text-shadow:none}
 .tv #now-card #song-artist::before,.tv #now-card #song-singer::before{content:none}
+/* karaoke-server: "After that" under the between-songs Up next card */
+.next-after{margin-top:3.2vh;text-align:left}
+.next-after .eyebrow{margin-bottom:1.2vh}
+#next-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:1vh}
+#next-list li{display:flex;align-items:center;gap:1vw;padding:.6vh .8vw;border-radius:14px;background:#ffffff0a;font-size:clamp(16px,1.45vw,28px)}
+#next-list li img{flex:none;width:clamp(40px,3.4vw,64px);aspect-ratio:1;object-fit:cover;border-radius:10px}
+#next-list .nl-text{flex:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#fffc}
+#next-list .nl-text b{color:var(--ink)}
+#next-list .nl-singer{flex:none;font-style:normal;font-weight:700;color:var(--lime)}
+#next-list li.more{background:none;color:var(--muted);font-size:clamp(14px,1.2vw,22px)}
+/* karaoke-server: the After that list replaces the peek cards; a more compact card leaves room for more songs */
+#up-next .peek{display:none!important}
+#up-next{translate:0 -9vh}
+#up-next .next-card{gap:2.2vw;padding:clamp(18px,1.8vw,32px)}
+#up-next .next-art{width:clamp(160px,14vw,280px)}
+#up-next .next-info h1{font-size:clamp(34px,3.4vw,72px);-webkit-line-clamp:2}

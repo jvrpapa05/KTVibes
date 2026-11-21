@@ -58,7 +58,7 @@ function remember(s){try{localStorage.setItem(SETTINGS,JSON.stringify(Object.fro
 function restore(s){const mine=saved();for(const action of SETTING_KEYS){const value=mine[action];if(value!==undefined&&value!==s[action])send({action,value});}}
 api('/api/config').then(c=>$('remote-url').textContent=$('sticker-url').textContent=c.remote_url).catch(e=>error(e.message));
 function render(next){
- state=next;if(state.version)$('app-version').textContent=`v${state.version}`;if(restoring){restoring=false;restore(state);}else remember(state);if(state.guide!==guide){if(guide!==undefined)showGuideBadge(state.guide);guide=state.guide;document.body.dataset.guide=guide;}showChanges(state);showQueueChange(state);document.body.style.setProperty('--lyric-scale',state.lyric_scale??1.5);document.body.dataset.video=state.video_mode||'show';document.body.dataset.lyrics=state.lyric_mode||'two';document.body.dataset.theme=state.theme||'default';for(const b of document.querySelectorAll('[data-theme-pick]'))b.setAttribute('aria-pressed',b.dataset.themePick===document.body.dataset.theme);showClassicBar(state);showSpecs(state);showBoot();roomClock();serverSkew=state.server_time-Date.now()/1000;$('tv-play').classList.toggle('paused',!state.playing);$('tv-play').setAttribute('aria-label',state.playing?'Pause':'Play');$('tv-guide').textContent=GUIDE_BADGES[state.guide]?.[0]??'Aa';$('tv-guide').hidden=(state.guides||[]).length<2;syncRanges();applyGain();
+ state=next;if(state.version)$('app-version').textContent=`v${state.version}`;showAfter(state);if(restoring){restoring=false;restore(state);}else remember(state);if(state.guide!==guide){if(guide!==undefined)showGuideBadge(state.guide);guide=state.guide;document.body.dataset.guide=guide;}showChanges(state);showQueueChange(state);document.body.style.setProperty('--lyric-scale',state.lyric_scale??1.5);document.body.dataset.video=state.video_mode||'show';document.body.dataset.lyrics=state.lyric_mode||'two';document.body.dataset.theme=state.theme||'default';for(const b of document.querySelectorAll('[data-theme-pick]'))b.setAttribute('aria-pressed',b.dataset.themePick===document.body.dataset.theme);showClassicBar(state);showSpecs(state);showBoot();roomClock();serverSkew=state.server_time-Date.now()/1000;$('tv-play').classList.toggle('paused',!state.playing);$('tv-play').setAttribute('aria-label',state.playing?'Pause':'Play');$('tv-guide').textContent=GUIDE_BADGES[state.guide]?.[0]??'Aa';$('tv-guide').hidden=(state.guides||[]).length<2;syncRanges();applyGain();
  const queued=state.upcoming.filter(i=>i.status!=='error');
  // karaoke-server: rebuild only when what it shows changes (a rebuild restarts the scrolling of long titles),
  // and start scrolling the new rows straight away.
@@ -564,3 +564,29 @@ setInterval(()=>{
  send({action:'tv_stats',value:{song:state.current.id,height:video.videoHeight,dropped,frames:total,waits:tvStats.waits,jumps:tvStats.jumps,max_drift:Math.round(tvStats.maxDrift*1000),agent:navigator.userAgent.slice(0,160)}});
  tvStats.jumps=0;tvStats.waits=0;tvStats.maxDrift=0;
 },30000);
+
+// karaoke-server: on the between-songs countdown screen, the big card is the song about to start; below it,
+// "After that" lists the following songs (artwork, title · artist, singer), as many as fit above the bottom of the
+// screen, then "+N more". It replaces the two "peek" cards that used to show songs 2 and 3 under the big card.
+const AFTER_MAX=12;let afterShown='';
+function showAfter(s){
+ const after=s.upcoming.filter(i=>i.status!=='error');
+ $('next-after').hidden=!after.length;
+ const key=JSON.stringify([after.length,innerHeight,...after.slice(0,AFTER_MAX).map(i=>[i.key,i.title,i.artist,i.singer])]);
+ if(key===afterShown)return;afterShown=key;
+ $('next-list').replaceChildren(...after.slice(0,AFTER_MAX).map(i=>{
+  const row=el('li'),art=el('img');art.alt='';art.src=thumbnail(i.id);
+  const text=el('span',undefined,'nl-text');text.append(el('b',i.title),el('span',` · ${i.artist}`));
+  row.append(art,text,...(i.singer?[el('em',i.singer,'nl-singer')]:[]));return row;}));
+ fitAfter(after.length);
+}
+function fitAfter(total){
+ const list=$('next-list');list.querySelector('li.more')?.remove();
+ if($('up-next').hidden)return;  // measured once the countdown screen shows (the 1 s tick below)
+ const rows=[...list.querySelectorAll('li:not(.more)')],limit=innerHeight*.94,rowHeight=rows[0]?.getBoundingClientRect().height||0;
+ if(rowHeight)while(rows.length>1&&list.getBoundingClientRect().bottom+(rows.length<total?rowHeight:0)>limit)rows.pop().remove();
+ const shown=list.querySelectorAll('li:not(.more)').length;
+ if(total>shown)list.append(el('li',`+${total-shown} more`,'more'));
+}
+setInterval(()=>{if(state&&!$('up-next').hidden){afterShown='';showAfter(state);}},1000);
+addEventListener('resize',()=>{afterShown='';});
