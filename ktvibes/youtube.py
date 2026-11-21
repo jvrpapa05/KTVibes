@@ -21,6 +21,9 @@ def parse_title(title: str, channel: str = "") -> dict:
     clean = re.sub(r"\s*[\[(（【][^\])）】]*(?:official|music video|lyrics?|mv|audio|4k|hd|hq|remaster(?:ed)?|官方|歌詞|歌词|뮤직비디오)[^\])）】]*[\])）】]", "", title, flags=re.I).strip()
     clean = re.sub(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F]", "", clean).strip()  # emoji: "(Lyrics) 🎵"
     clean = re.sub(r"\s*(?:[-–—|｜]|//)?\s*(?:official\s+)?(?:music\s+video|mv|lyric video|lyrics?)\s*$", "", clean, flags=re.I).strip()
+    # karaoke-server: a trailing "| Official Performance Video", "| Official Video", "| Lyric Visualizer"... after a pipe
+    # (never a dash, which separates artist and title) is not part of the song's name; it broke the lyrics lookup.
+    clean = re.sub(r"\s*(?:[|｜]|//)\s*[^|｜]*\b(?:official|performance video|lyric video|visuali[sz]er|music video)\b[^|｜]*$", "", clean, flags=re.I).strip()
     bracketed = re.match(r"(.+?)\s*【([^】]+)】", clean)
     if bracketed:  # "周杰倫 Jay Chou【晴天 Sunny Day】", even with a trailing "華視偶像劇…片尾曲"
         return {"artist": bracketed[1], "title": bracketed[2]}

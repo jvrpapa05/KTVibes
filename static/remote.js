@@ -366,11 +366,14 @@ async function pickLyrics(song){
    // One row per language (its best version) first; other editions sit behind "Show all". Searches list everything.
    const seen=new Set(),extra=[];
    for(const o of options){
-    const first=!seen.has(o.language);seen.add(o.language);
+    // karaoke-server: "Latin script" (any A-Z language, so every English/Filipino version) says nothing to our singers:
+    // no label for those, each version shows on its own (no "Show all"), headed by its own title.
+    const lang=o.language==='Latin script'?'':o.language,key=lang||`version-${o.id}`;
+    const first=!seen.has(key);seen.add(key);
     const b=el('button',undefined,'lyric-option'+(o.current?' current':'')),top=el('div');
     const gap=Math.abs(o.difference)>10?` · ${Math.abs(o.difference)}s ${o.difference>0?'longer':'shorter'} than this video`:'';
     const lines=el('span',undefined,'cnt classic-only'),figure=el('span',String(o.lines),'lcd');figure.dataset.ghost='88';lines.append(figure,'LINES',...(gap?[el('span',gap.slice(3),'gap')]:[]));
-    top.append(el('b',o.language),el('span',[o.track,o.artist,o.album].filter(Boolean).join(' · ')),...(o.current?[el('em','In use')]:[]),lines);
+    top.append(el('b',lang||o.track||'Lyrics'),el('span',(lang?[o.track,o.artist,o.album]:[o.artist,o.album]).filter(Boolean).join(' · ')),...(o.current?[el('em','In use')]:[]),lines);
     b.append(top,...o.preview.map(line=>el('small',line)),el('small',`${o.lines} lines${gap}`,'count'));
     b.onclick=async()=>{
      for(const other of list.children)other.disabled=true;b.classList.add('busy');

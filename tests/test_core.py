@@ -15,6 +15,13 @@ class LyricsTests(unittest.TestCase):
         self.assertEqual(parse_lrc('[ar:周杰倫]\n[offset:-500]\n[00:02.50][00:04.000]你好 안녕\n[00:01.00]'),
                          [{'t': .5, 'text': ''}, {'t': 2.0, 'text': '你好 안녕'}, {'t': 3.5, 'text': '你好 안녕'}])
 
+    def test_title_drops_pipe_suffixes_like_official_performance_video(self):
+        # karaoke-server: these suffixes broke the LRCLIB lookup ("Saranggola | Official Performance Video").
+        self.assertEqual(parse_title('Ben&Ben - Saranggola | Official Performance Video'), {'artist': 'Ben&Ben', 'title': 'Saranggola'})
+        self.assertEqual(parse_title('IV OF SPADES - Mundo | Official Video'), {'artist': 'IV OF SPADES', 'title': 'Mundo'})
+        self.assertEqual(parse_title('Zack Tabudlo - Binibini | Lyric Visualizer'), {'artist': 'Zack Tabudlo', 'title': 'Binibini'})
+        self.assertEqual(parse_title('India.Arie - Video'), {'artist': 'India.Arie', 'title': 'Video'})  # a song named "Video" stays
+
     def test_title_metadata_preserves_original_script(self):
         self.assertEqual(parse_title('周杰倫 - 晴天 (Official MV)'), {'artist': '周杰倫', 'title': '晴天'})
         self.assertEqual(parse_title('아이유 - 좋은 날 (Official Audio)'), {'artist': '아이유', 'title': '좋은 날'})
