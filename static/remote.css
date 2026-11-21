@@ -303,3 +303,7 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
 /* karaoke-server: the song you just added, briefly highlighted in the queue */
 .row.just-added{animation:just-added 2.4s ease-out}
 @keyframes just-added{0%,25%{background:#d7fc7033;box-shadow:inset 3px 0 0 var(--lime)}100%{background:transparent;box-shadow:inset 3px 0 0 transparent}}
+/* karaoke-server: the Photo button doubles as the progress bar of a pick */
+.fun-btn.sending{position:relative;overflow:hidden;opacity:1;color:var(--ink);font-variant-numeric:tabular-nums}
+.fun-btn.sending::before{content:'';position:absolute;inset:0;width:calc(var(--p,0)*100%);background:#d7fc7040;transition:width .25s linear;z-index:-1}
+.fun-btn.sending{isolation:isolate}

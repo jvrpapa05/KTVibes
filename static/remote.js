@@ -530,6 +530,8 @@ lockSettings();
 // Photos are shrunk on the phone first (longest side 1280 px, JPEG), so they upload fast even on the slow route.
 function onFun(event){
  if(event.type!=='fun')return;
+ // During this phone's own photo batch, only the last photo's notice shows (it carries the Hide).
+ if(event.kind==='photo'&&photoBatch&&event.name===singer()&&--photoBatch.noticesLeft>0)return;
  const what=event.kind==='photo'?'Photo':'Shout-out';
  toast(`${what} from ${event.name} on the TV`,{label:'Hide',run:()=>send({action:'hide',id:event.id})});
 }
@@ -555,20 +557,32 @@ async function sendPhoto(file){
  const r=await fetch('/api/photo',{method:'POST',headers:{'Content-Type':'image/jpeg','X-Singer':encodeURIComponent(singer()),'X-Device':deviceId()},body:blob});
  if(!r.ok){let m=`Couldn't send (${r.status})`;try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
 }
+// karaoke-server: the Photo button itself shows the progress of a pick ("Sending 2 of 5" over a filling bar)
+// instead of a toast that keeps changing. While your own batch goes out, the TV's "Photo from you" notices are
+// held back on this phone except for the last one, which keeps its Hide. Only a cap or a failure gets a toast.
+let photoBatch=null;  // {total, noticesLeft} while this phone is sending a pick
+function showPhotoProgress(done,total,sending){
+ const b=$('photo-open');
+ if(!total){b.classList.remove('sending');b.style.removeProperty('--p');b.textContent='📷 Photo';return;}
+ b.classList.add('sending');b.style.setProperty('--p',(done/total).toFixed(3));b.textContent=`Sending ${Math.min(done+(sending?1:0),total)} of ${total}`;
+}
 $('photo-input').onchange=async()=>{
  const files=[...($('photo-input').files||[])];if(!files.length)return;
  const batch=files.slice(0,PHOTO_BATCH);
- $('photo-open').disabled=true;let sent=0,failed=0;
+ if(files.length>PHOTO_BATCH)toast(`Sending the first ${PHOTO_BATCH} of ${files.length} photos`);
+ $('photo-open').disabled=true;let sent=0,failed=0;photoBatch={total:batch.length,noticesLeft:batch.length};
  try{
-  // Progress shows before each photo; the TV's "Photo from … [Hide]" notice arrives after it, so the last
-  // photo can always be hidden. Only a failure gets a closing message.
   for(const [i,file] of batch.entries()){
-   if(i)await new Promise(r=>setTimeout(r,PHOTO_GAP));
-   toast(files.length>PHOTO_BATCH&&!i?`Sending the first ${PHOTO_BATCH} of ${files.length} photos…`:batch.length>1?`Sending photo ${i+1} of ${batch.length}…`:'Sending photo…');
-   try{await sendPhoto(file);sent++;haptic(10);}catch(error){failed++;toast(error.message,undefined,'err');}
+   if(i){  // the server takes one photo per 3 s from a phone: let the bar creep forward meanwhile
+    const from=(i)/batch.length,to=(i+.5)/batch.length,t0=Date.now();
+    await new Promise(r=>{const tick=()=>{const f=Math.min(1,(Date.now()-t0)/PHOTO_GAP);$('photo-open').style.setProperty('--p',(from+(to-from)*f).toFixed(3));f<1?requestAnimationFrame(tick):r();};tick();});
+   }
+   showPhotoProgress(i,batch.length,true);
+   try{await sendPhoto(file);sent++;haptic(10);}catch(error){failed++;photoBatch.noticesLeft--;toast(error.message,undefined,'err');}
+   showPhotoProgress(i+1,batch.length,false);
   }
   if(failed)toast(`${sent} of ${batch.length} photos sent`,undefined,'err');
- }finally{$('photo-open').disabled=false;$('photo-input').value='';}
+ }finally{photoBatch=null;showPhotoProgress(0,0);$('photo-open').disabled=false;$('photo-input').value='';}
 };
 
 // karaoke-server: the cheers, Shout-out and Photo live in the Now singing card while a song plays. Between songs
