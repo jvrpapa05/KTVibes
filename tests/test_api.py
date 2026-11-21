@@ -235,8 +235,10 @@ class APITests(unittest.TestCase):
         with patch.object(self.main.youtube, 'search', return_value=results), \
              patch.object(self.main, 'lyric_records', AsyncMock(return_value=[{'id': 1, 'artistName': 'LANY', 'trackName': 'Soft', 'duration': 179, 'syncedLyrics': lrc}])):
             found = self.client.get('/api/search', params={'q': 'lany soft'}).json()
-        # 178 s matches the 179 s timing; 260 s (a story cut) doesn't; the prepared one with timed lyrics stays
-        self.assertEqual([r['id'] for r in found], ['aaaaaaaaaaa', 'ccccccccccc'])
+        # 178 s matches the 179 s timing; 260 s (a story cut) doesn't; the prepared one with timed lyrics stays,
+        # and comes first: our library matches the search (it starts at once, its lyrics are proven)
+        self.assertEqual([r['id'] for r in found], ['ccccccccccc', 'aaaaaaaaaaa'])
+        self.assertTrue(found[0]['library'])
 
     def test_search_pages(self):
         with patch.object(self.main.youtube, 'search', return_value=[]) as search, \

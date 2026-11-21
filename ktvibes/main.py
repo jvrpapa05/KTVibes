@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 from pathlib import Path
+import re
 import socket
 import logging
 import time
@@ -136,7 +137,10 @@ async def search(q: str = Query(min_length=1, max_length=200), page: int = Query
     # karaoke-server: only what can be sung: synced lyrics that match this video, or a prepared song that has them
     # (user, 2026-11-22: "Show a list that is indeed playable").
     playable = [r for r in results if r.get("lyrics_match") or (r["cached"] and (CACHE / r["id"] / "timed.json").is_file())]
-    metrics.record("search_playable", q=q, page=page, shown=len(playable), hidden=len(results) - len(playable))
+    # karaoke-server: matching songs from our own library first (first page only)
+    mine = [{**s, "cached": True} for s in library_matches(q)] if page == 0 else []
+    playable = mine + [r for r in playable if r["id"] not in {s["id"] for s in mine}]
+    metrics.record("search_playable", q=q, page=page, shown=len(playable), hidden=len(results) - len(playable), library=len(mine))
     return playable
 
 def check_lyrics(found: list[dict], records: list[dict]) -> None:
@@ -184,8 +188,41 @@ def prepared_songs() -> dict:
         video_id = meta_path.parent.name
         if youtube.ID.fullmatch(video_id) and meta.get("artist") and meta.get("title") and stems.prepared(meta_path.parent):
             songs[video_id] = {"id": video_id, "artist": meta["artist"], "title": meta["title"], "duration": meta.get("duration"),
-                               "thumbnail": f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg", "prepared": prepared, "number": meta.get("number")}
+                               "thumbnail": f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg", "prepared": prepared, "number": meta.get("number"),
+                               "source_title": meta.get("source_title") or ""}
     return songs
+
+def library_matches(q: str, limit: int = 3) -> list[dict]:
+    """karaoke-server: prepared songs with timed lyrics that match every word of the search (a word may be the start
+    of one: "Pahintulo"), as search results. They start at once and their lyrics are proven, so they come first;
+    songs are often sung again (the party searched "LANY Soft", "Dominga" and "i choose you" 2-3 times each)."""
+    words = re.findall(r"\w+", q.casefold())
+    if not words:
+        return []
+    found = []
+    for song in prepared_songs().values():
+        if not (CACHE / song["id"] / "timed.json").is_file():
+            continue
+        own = re.findall(r"\w+", f"{song['artist']} {song['title']}".casefold())
+        text = own + re.findall(r"\w+", song["source_title"].casefold())
+        if all(any(t.startswith(w) for t in text) for w in words):
+            # best first: the title is exactly the search ("You": Basil Valdez's "You" before "Love Yourself"), then
+            # whole words, then the song's own artist/title over its YouTube title; newest first among equals
+            exact_title = "".join(words) in ("".join(re.findall(r"\w+", song["title"].casefold())),
+                                            "".join(re.findall(r"\w+", f"{song['artist']} {song['title']}".casefold())),
+                                            "".join(re.findall(r"\w+", f"{song['title']} {song['artist']}".casefold())))
+            found.append((not exact_title, not all(w in text for w in words), not all(any(t.startswith(w) for t in own) for w in words),
+                          -song["prepared"], song))
+    title = lambda s: s["source_title"] or f"{s['artist']} - {s['title']}"
+    seen, unique = set(), []
+    for f in sorted(found, key=lambda f: f[:4]):
+        key = (youtube.lead_artist(f[-1]["artist"]), youtube.song_name(f[-1]["title"]))  # one per song
+        if key not in seen:
+            seen.add(key); unique.append(f)
+    found = unique
+    return [{"id": s["id"], "title": title(s), "channel": s["artist"], "duration": s["duration"], "thumbnail": s["thumbnail"],
+             "kind": youtube.kind(title(s), s["artist"], s["artist"]), "parsed": {"artist": s["artist"], "title": s["title"]},
+             "lyrics_match": True, "library": True} for *_, s in found[:limit]]
 
 @app.get("/api/recent")
 async def recent(limit: int = Query(20, ge=1, le=50)):
