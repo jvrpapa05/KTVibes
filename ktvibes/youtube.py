@@ -52,10 +52,12 @@ def is_music(title: str, duration) -> bool:
 # YouTube's own order is kept within each kind. Lyric/audio/live words are checked before "official", so an
 # "Official Lyric Video" counts as a lyric video and an "Official Audio" as audio.
 KIND_ORDER = {"official": 0, "lyric": 1, "audio": 2, "other": 3, "live": 4}
-LYRIC = re.compile(r"\blyrics?\b|lyric video|\(lyric\)|가사|歌詞|歌词", re.I)
+LYRIC = re.compile(r"\blyrics?\b|lyric video|\(lyric\)|sing-?along|가사|歌詞|歌词", re.I)
 AUDIO = re.compile(r"official audio|\baudio\b|visuali[sz]er", re.I)
 LIVE = re.compile(r"\blive\b|live at|live session|\bconcert\b|\bunplugged\b", re.I)
-OFFICIAL = re.compile(r"official (?:music )?video|\bm/?v\b|official mv|뮤직비디오", re.I)
+# Learned from our own library (2026-11-21): "Official HD Music Video", "Official Performance Video", a bare
+# "(Official)" and "(Music Video)" are official too; "(Roblox Music Video)" is not (only a bare bracket counts).
+OFFICIAL = re.compile(r"official\b[^()\[\]|]{0,25}?\bvideo\b|[\[(]\s*official\s*[\])]|[\[(]\s*music video\s*[\])]|\bm/?v\b|official mv|뮤직비디오", re.I)
 
 def kind(title: str, channel: str = "", artist: str = "") -> str:
     """What sort of upload a search result is: official, lyric, audio, live or other."""

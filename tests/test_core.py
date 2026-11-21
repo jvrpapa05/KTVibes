@@ -31,6 +31,16 @@ class LyricsTests(unittest.TestCase):
         self.assertEqual(youtube.kind('Adele - Hello (Live at the BBC)', 'Adele', 'Adele'), 'live')
         self.assertEqual(youtube.kind('Taylor Swift - Shake It Off', 'TaylorSwiftVEVO', 'Taylor Swift'), 'official')
         self.assertEqual(youtube.kind('someone sings shallow', 'random guy'), 'other')
+        # learned from our library's real titles
+        for title, want in [('Evanescence - Bring Me To Life (Official HD Music Video) ft. Paul McCoy', 'official'),
+                            ('LANY - When Did You Stop Loving Me? (Music Video)', 'official'),
+                            ('LANY - Prettiest Thing I’ve Ever Seen (Official)', 'official'),
+                            ('Ben&Ben - Saranggola | Official Performance Video', 'official'),
+                            ('Remember Me (Lullaby) (From "Coco"/Sing-Along)', 'lyric'),
+                            ('ITS RAINING TACOS! (Roblox Music Video)', 'other'),
+                            ('LANY - Stuck (Official Lyric Video)', 'lyric'),
+                            ("Elvis Presley - Can't Help Falling In Love (Official Audio)", 'audio')]:
+            self.assertEqual(youtube.kind(title), want, title)
         entries = [{'id': f'aaaaaaaaaa{n}', 'title': t, 'channel': c, 'duration': 200} for n, (t, c) in enumerate([
             ('Artist - Song (Lyrics)', 'lyrics hub'), ('Artist - Song (Live)', 'Artist'), ('Artist - Song (Official Music Video)', 'Artist'),
             ('Artist - Song (Official Audio)', 'Artist'), ('Artist - Song lyric video', 'other hub')])]
