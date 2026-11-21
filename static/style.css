@@ -202,3 +202,11 @@ body.still :is(.tv-tools,.tv-bottom,.open-remote){opacity:0;pointer-events:none}
 .polaroid figcaption.polaroid-note{display:flex;align-items:baseline;justify-content:space-between;gap:.6em;padding:1vw .4vw 1.7vw;font:600 calc(clamp(20px,1.9vw,36px)*var(--ui,1))/1.05 'Caveat','Segoe Print','Bradley Hand',cursive;color:#23306b;text-align:left;transform:rotate(-1.2deg)}
 .polaroid .pn-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .polaroid .pn-date{flex:none;font-size:.78em;font-weight:500;color:#3b4a8f}
+/* karaoke-server: the top-left "now singing" card: artwork, then song / artist / singer on their own lines */
+#now-card:not([hidden]){display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;column-gap:1vw;white-space:nowrap;max-width:min(42vw,760px);padding:.6vw 1.4vw .6vw .6vw;border-radius:1.1vw;background:#0b0e0dcc;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 10px 40px #0008;font-size:inherit}
+#now-art{width:clamp(56px,5vw,110px);aspect-ratio:1;object-fit:cover;border-radius:.7vw;box-shadow:0 4px 14px #0009;background:#222}
+#now-card .now-text{display:flex;flex-direction:column;gap:.2em;min-width:0}
+.tv #now-card #song-title{font:700 clamp(20px,1.8vw,34px)/1.15 'Space Grotesk',sans-serif;letter-spacing:-.02em;text-shadow:none;overflow:hidden;white-space:nowrap}
+.tv #now-card #song-artist{min-width:0;font:500 clamp(15px,1.25vw,24px)/1.2 'Space Grotesk',sans-serif;color:#fffb;text-shadow:none}
+.tv #now-card #song-singer{font:700 clamp(14px,1.15vw,22px)/1.2 'Space Grotesk',sans-serif;color:var(--lime);text-shadow:none}
+.tv #now-card #song-artist::before,.tv #now-card #song-singer::before{content:none}
