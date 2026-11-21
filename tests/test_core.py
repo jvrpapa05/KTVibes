@@ -113,8 +113,9 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         a = await state.add('abcdefghijk', 'A', 'First')
         a['status'], a['duration'] = 'ready', 100
         state.promote()
-        await state.control({'action': 'seek', 'position': 500})
-        self.assertEqual((state.position, state.seek_id), (100, 1))
+        with self.assertRaisesRegex(ValueError, 'paused or skipped'):  # karaoke-server: no seeking
+            await state.control({'action': 'seek', 'position': 50})
+        self.assertEqual((state.position, state.seek_id), (0, 0))
         await state.control({'action': 'lyric_scale', 'value': 9})
         self.assertEqual(state.lyric_scale, 2.5)
         await state.control({'action': 'music', 'value': -1})
@@ -271,7 +272,6 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
             await state.add('12345678901', '아이유', '좋은 날')
             a['status'] = 'ready'
             state.promote()
-            await state.control({'action': 'seek', 'position': 0})
             state.position = 42.5
             await state.broadcast()
             again = State()

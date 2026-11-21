@@ -57,7 +57,7 @@ function remember(s){try{localStorage.setItem(SETTINGS,JSON.stringify(Object.fro
 function restore(s){const mine=saved();for(const action of SETTING_KEYS){const value=mine[action];if(value!==undefined&&value!==s[action])send({action,value});}}
 api('/api/config').then(c=>$('remote-url').textContent=$('sticker-url').textContent=c.remote_url).catch(e=>error(e.message));
 function render(next){
- state=next;if(restoring){restoring=false;restore(state);}else remember(state);if(state.guide!==guide){if(guide!==undefined)showGuideBadge(state.guide);guide=state.guide;document.body.dataset.guide=guide;}showChanges(state);showQueueChange(state);document.body.style.setProperty('--lyric-scale',state.lyric_scale??1.5);document.body.dataset.video=state.video_mode||'show';document.body.dataset.lyrics=state.lyric_mode||'two';document.body.dataset.theme=state.theme||'default';for(const b of document.querySelectorAll('[data-theme-pick]'))b.setAttribute('aria-pressed',b.dataset.themePick===document.body.dataset.theme);showClassicBar(state);showSpecs(state);showBoot();roomClock();serverSkew=state.server_time-Date.now()/1000;$('vocal').value=state.vocal;if(document.activeElement!==$('tv-music'))$('tv-music').value=state.music??1;$('tv-play').classList.toggle('paused',!state.playing);$('tv-play').setAttribute('aria-label',state.playing?'Pause':'Play');$('tv-guide').textContent=GUIDE_BADGES[state.guide]?.[0]??'Aa';$('tv-guide').hidden=(state.guides||[]).length<2;syncRanges();applyGain();
+ state=next;if(restoring){restoring=false;restore(state);}else remember(state);if(state.guide!==guide){if(guide!==undefined)showGuideBadge(state.guide);guide=state.guide;document.body.dataset.guide=guide;}showChanges(state);showQueueChange(state);document.body.style.setProperty('--lyric-scale',state.lyric_scale??1.5);document.body.dataset.video=state.video_mode||'show';document.body.dataset.lyrics=state.lyric_mode||'two';document.body.dataset.theme=state.theme||'default';for(const b of document.querySelectorAll('[data-theme-pick]'))b.setAttribute('aria-pressed',b.dataset.themePick===document.body.dataset.theme);showClassicBar(state);showSpecs(state);showBoot();roomClock();serverSkew=state.server_time-Date.now()/1000;$('tv-play').classList.toggle('paused',!state.playing);$('tv-play').setAttribute('aria-label',state.playing?'Pause':'Play');$('tv-guide').textContent=GUIDE_BADGES[state.guide]?.[0]??'Aa';$('tv-guide').hidden=(state.guides||[]).length<2;syncRanges();applyGain();
  const queued=state.upcoming.filter(i=>i.status!=='error');
  $('on-deck').replaceChildren(...queued.slice(0,3).map(i=>{const row=el('li');row.append(...(i.singer?[el('em',`${i.singer}: `,'deck-singer')]:[]),el('b',i.title),el('span',` ${i.artist}`),...(i.status==='ready'?[]:[el('small',` ${prepLabel(i).text}`)]));return row;}));
  if(queued.length>3)$('on-deck').append(el('li',`+${queued.length-3} more`,'more'));
@@ -279,11 +279,8 @@ $('enable-button').onclick=async()=>{
 };
 $('fullscreen').onclick=()=>{const result=document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen();result.catch(e=>error(e.message));};
 addEventListener('fullscreenchange',()=>{const full=!!document.fullscreenElement,label=full?'Exit fullscreen':'Fullscreen';$('fullscreen').classList.toggle('full',full);$('fullscreen').setAttribute('aria-label',label);$('fullscreen').title=label;});
-const sendVocal=throttle(value=>send({action:'vocal',value}));
-$('vocal').oninput=()=>sendVocal(Number($('vocal').value));
+// karaoke-server: no Music/Vocals sliders on the TV; phones control the mix (and each singer's profile).
 // Bottom-bar controls for whoever sits at the TV computer.
-const sendMusic=throttle(value=>send({action:'music',value}));
-$('tv-music').oninput=()=>sendMusic(Number($('tv-music').value));
 $('tv-play').onclick=()=>send({action:state?.playing?'pause':'play'});
 $('tv-skip').onclick=()=>send({action:'skip'});
 $('tv-guide').onclick=()=>send({action:'guide',value:'cycle'});
@@ -380,11 +377,7 @@ function frame(now){
  requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
-document.querySelector('.track').onclick=e=>{
- if(!state?.current)return;
- const box=e.currentTarget.getBoundingClientRect();
- send({action:'seek',position:(e.clientX-box.left)/box.width*state.current.duration});
-};
+// karaoke-server: the progress bar only shows progress; songs can be paused or skipped, not moved within.
 const GUIDE_BADGES={off:['–','Guide off'],latin:['Aa','Romanization'],jyutping:['粵','Jyutping'],hangul:['가','한글']};
 let badgeTimer;
 function showGuideBadge(mode){const [icon,label]=GUIDE_BADGES[mode];showBadge(icon,'Pronunciation',label);}
@@ -470,22 +463,7 @@ function showPrep(queued){
  $('idle-prep-step').textContent=text;$('idle-prep-title').textContent=item.title;
  const bar=$('idle-prep-bar');bar.parentElement.classList.toggle('busy',percent==null);bar.parentElement.style.setProperty('--p',percent==null?0:percent/100);
 }
-// A floating remote for whoever sits at the TV computer: an always-on-top Picture-in-Picture window
-// where the browser supports it (it stays over fullscreen), otherwise a small popup. Tap again to close.
-let remoteWindow=null;
-$('open-remote').onclick=async()=>{
- if(remoteWindow&&!remoteWindow.closed){remoteWindow.close();remoteWindow=null;return;}
- try{
-  if('documentPictureInPicture' in window){
-   // Phone-sized; preferInitialWindowPlacement stops Chrome reusing the size the window was last dragged to.
-   remoteWindow=await documentPictureInPicture.requestWindow({width:390,height:Math.min(844,screen.availHeight-80),preferInitialWindowPlacement:true});
-   const frame=remoteWindow.document.createElement('iframe');frame.src='/remote';frame.title='KTVibes remote';
-   frame.style.cssText='position:fixed;inset:0;width:100%;height:100%;border:0';
-   remoteWindow.document.body.style.cssText='margin:0;background:#111313';remoteWindow.document.body.append(frame);
-   remoteWindow.addEventListener('pagehide',()=>{remoteWindow=null;});
-  }else remoteWindow=open('/remote','ktvibes-remote',`popup,width=390,height=${Math.min(844,screen.availHeight-80)},left=${screenX+outerWidth-430},top=${screenY+80}`);
- }catch(e){error(e.message);}
-};
+// karaoke-server: no "Open remote" on the TV; the remote is each person's phone.
 
 // Hide the TV's controls and pointer when nobody is using the mouse or keyboard.
 let stillTimer;

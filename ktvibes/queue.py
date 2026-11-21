@@ -351,10 +351,8 @@ class State:
             self.offset = max(-30, min(30, self.offset + number(message.get("delta", 0))))
             self.remember_offset()
         elif action == "seek":
-            if not self.current:
-                raise ValueError("Nothing is playing")
-            self.position = max(0, min(number(message["position"]), self.current["duration"]))
-            self.seek_id += 1
+            # karaoke-server: like a karaoke machine, a song can only be paused or skipped, never moved within.
+            raise ValueError("Songs can only be paused or skipped")
         elif action == "lyric_scale":
             self.lyric_scale = max(0.6, min(2.5, number(message["value"])))
             self.remember_profile()

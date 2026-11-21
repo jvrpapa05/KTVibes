@@ -266,3 +266,5 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
    dim their first real boxes instead. */
 .sheet .sg[inert]>:not(.mixline),.sheet .sg[inert]>.mixline>*{opacity:.38;filter:saturate(.4);transition:opacity .2s}
 .name-error{margin:0;color:#ffaaa2;font-size:15px}
+/* karaoke-server: progress is display-only; songs can only be paused or skipped. */
+#scrub,#hero-bar{pointer-events:none;cursor:default}

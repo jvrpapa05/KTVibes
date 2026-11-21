@@ -53,7 +53,7 @@ function showHero(on,first){
  if(!on)animation.onfinish=()=>{if(!heroShown)hero.hidden=true;};
 }
 // Estimate the TV position between its two-second progress reports.
-let scrubbing=false;
+let scrubbing=false;  // karaoke-server: never true now; the position bar is read-only (no seeking)
 function showPosition(){
  if(!state)return;
  const live=state.current&&state.playing&&state.position>0?Date.now()/1000-state.received:0;
@@ -63,10 +63,6 @@ function showPosition(){
  if(!scrubbing){$('scrub').value=position;$('position').textContent=clock(position);syncRanges();}
 }
 setInterval(showPosition,500);
-$('hero-bar').onclick=e=>{if(!state?.current)return;const box=e.currentTarget.getBoundingClientRect();send({action:'seek',position:Math.max(0,Math.min(1,(e.clientX-box.left)/box.width))*state.current.duration});};
-$('hero-bar').onkeydown=e=>{const step={ArrowLeft:-5,ArrowRight:5}[e.key];if(step&&state?.current){e.preventDefault();send({action:'seek',position:state.position+step});}};
-$('scrub').oninput=()=>{scrubbing=true;$('position').textContent=clock(Number($('scrub').value));};
-$('scrub').onchange=()=>{scrubbing=false;send({action:'seek',position:Number($('scrub').value)});};
 const playPause=()=>{haptic(8);send({action:state?.playing?'pause':'play'});};
 $('hero-play').onclick=$('dock-play').onclick=playPause;
 $('skip').onclick=()=>{haptic(12);send({action:'skip'});};
