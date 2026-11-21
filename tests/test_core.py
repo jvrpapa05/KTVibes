@@ -295,6 +295,9 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         with self.assertRaisesRegex(ValueError, "can't be moved"):
             await state.control({'action': 'reorder', 'keys': [b['key'], a['key']]})
         self.assertEqual([i['title'] for i in state.upcoming], ['First', 'Second'])
+        with self.assertRaisesRegex(ValueError, "can't be removed"):    # and it is read-only: no removing either
+            await state.control({'action': 'remove', 'key': a['key']})
+        self.assertEqual(len(state.upcoming), 2)
 
     def test_singer_names_are_unique_per_phone_until_idle(self):
         state = State()
@@ -345,6 +348,8 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         self.assertIs(state.current, b)
         self.assertEqual(state.upcoming, [a])
 
+    @unittest.skip("karaoke-server: songs can\'t be removed from the queue")
+
     async def test_removed_inflight_item_cannot_return(self):
         state = State()
         a = await state.add('abcdefghijk', 'A', 'First')
@@ -376,6 +381,8 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
             await state.control({'action': 'reorder', 'keys': [a['key'], a['key']]})
         await state.control({'action': 'reorder', 'keys': [b['key'], a['key']]})
         self.assertEqual(state.upcoming, [b, a])
+
+    @unittest.skip("karaoke-server: songs can\'t be removed from the queue")
 
     async def test_removal_can_be_undone_in_place(self):
         state = State()
@@ -545,6 +552,7 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
             self.assertIsNone(state.current)
 
 class WorkerRunTests(unittest.IsolatedAsyncioTestCase):
+    @unittest.skip("karaoke-server: songs can\'t be removed from the queue")
     async def test_removed_song_stops_holding_up_the_queue(self):
         import tempfile, threading
         from pathlib import Path

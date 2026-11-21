@@ -234,8 +234,8 @@ function queueRow(item,index,justReady){
  // Classic: 우선 moves a song to sing next, as on the machine.
  const first=el('button','우선','row-button first classic-only');first.setAttribute('aria-label',`Play ${item.title} next`);first.hidden=index===0;
  first.onclick=()=>{haptic(8);move(index,0);toast(`${item.title} 우선예약`);};
- // karaoke-server: the queue plays in order, so no grip, drag or 우선 (play next): only remove.
- row.append(el('span',String(index+1),'num'),thumb,info,remove);
+ // karaoke-server: the queue is a read-only list of songs to play: no move, play-next or remove.
+ row.append(el('span',String(index+1),'num'),thumb,info);
  return row;
 }
 function move(from,to){const keys=state.upcoming.map(i=>i.key);keys.splice(to,0,...keys.splice(from,1));send({action:'reorder',keys});}

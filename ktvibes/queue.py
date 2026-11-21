@@ -464,9 +464,8 @@ class State:
             self.vocal = max(0, min(1, number(message["value"])))
             self.remember_profile()
         elif action == "remove":
-            index = next((n for n, i in enumerate(self.upcoming) if i["key"] == message.get("key")), None)
-            if index is not None:
-                self.undo = {"item": self.upcoming.pop(index), "index": index, "until": time.time() + UNDO_SECONDS}
+            # karaoke-server: the queue is just the list of songs to play; nobody removes songs from it.
+            raise ValueError("Songs can't be removed from the queue")
         elif action == "retry":
             item = next((i for i in self.upcoming if i["key"] == message.get("key") and i["status"] == "error"), None)
             if item is None:
