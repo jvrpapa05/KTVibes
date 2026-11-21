@@ -1,10 +1,11 @@
-import {$,el,connect,api,clock,throttle,prepLabel,syncRanges,REDUCED,thumbnail,newSongs} from './shared.js';
+import {$,el,connect,api,clock,throttle,prepLabel,syncRanges,REDUCED,thumbnail,newSongs,marquees} from './shared.js';
 const music=$('instrumental'),voice=$('vocals'),video=$('backdrop');
 video.muted=true;
 let breather=0,guide,state,lyrics=[],firstLine=-1,stemGain=1,currentKey=null,context,musicGain,voiceGain,shifter,enabled=false,activeLine=-1,starting=false,generation=0,lastReport=0,seekTo=null,serverSkew=0,buffering=false,videoStarting=false,lyricsPositioned=false,lastSeek=0,shownPair='',fitKey='';
 const error=text=>$('tv-error').textContent=text;
 // This screen remembers its own display settings and restores them each time it (re)connects.
 // karaoke-server: the TV no longer restores vocals (they belong to singer profiles, and a TV reload must not overwrite one) or guides (off).
+let deckShown='';  // karaoke-server: what the Up next list last showed
 const SETTINGS='ktvibes.tv-settings',SETTING_KEYS=['lyric_scale','video_mode','lyric_mode'];let restoring=false;
 // On (re)connect, also tell the server whether sound is on, so remotes know if playback can start.
 // Many music videos have black bars baked into the frame; sample a few frames, find the bars,
@@ -59,9 +60,14 @@ api('/api/config').then(c=>$('remote-url').textContent=$('sticker-url').textCont
 function render(next){
  state=next;if(state.version)$('app-version').textContent=`v${state.version}`;if(restoring){restoring=false;restore(state);}else remember(state);if(state.guide!==guide){if(guide!==undefined)showGuideBadge(state.guide);guide=state.guide;document.body.dataset.guide=guide;}showChanges(state);showQueueChange(state);document.body.style.setProperty('--lyric-scale',state.lyric_scale??1.5);document.body.dataset.video=state.video_mode||'show';document.body.dataset.lyrics=state.lyric_mode||'two';document.body.dataset.theme=state.theme||'default';for(const b of document.querySelectorAll('[data-theme-pick]'))b.setAttribute('aria-pressed',b.dataset.themePick===document.body.dataset.theme);showClassicBar(state);showSpecs(state);showBoot();roomClock();serverSkew=state.server_time-Date.now()/1000;$('tv-play').classList.toggle('paused',!state.playing);$('tv-play').setAttribute('aria-label',state.playing?'Pause':'Play');$('tv-guide').textContent=GUIDE_BADGES[state.guide]?.[0]??'Aa';$('tv-guide').hidden=(state.guides||[]).length<2;syncRanges();applyGain();
  const queued=state.upcoming.filter(i=>i.status!=='error');
+ // karaoke-server: rebuild only when what it shows changes (a rebuild restarts the scrolling of long titles),
+ // and start scrolling the new rows straight away.
+ const deck=JSON.stringify([queued.length,...queued.slice(0,3).map(i=>[i.singer,i.title,i.artist,i.status==='ready'?'':prepLabel(i).text])]);
+ if(deck!==deckShown){deckShown=deck;
  $('on-deck').replaceChildren(...queued.slice(0,3).map(i=>{const row=el('li');row.append(...(i.singer?[el('em',`${i.singer}: `,'deck-singer')]:[]),el('b',i.title),el('span',` ${i.artist}`),...(i.status==='ready'?[]:[el('small',` ${prepLabel(i).text}`)]));return row;}));
  if(queued.length>3)$('on-deck').append(el('li',`+${queued.length-3} more`,'more'));
  if(!queued.length)$('on-deck').append(el('li','Nothing queued','more'));
+ marquees('#on-deck li:not(.more)');}
  // The two songs after the next one peek out from under its card between songs.
  [1,2].forEach(n=>{const item=queued[n-1],peek=$(`peek-${n}`),line=el('span');peek.hidden=!item;if(item){line.append(el('b',String(n+1)),`${item.title} · ${item.artist}`);peek.replaceChildren(line);}});
  showPrep(queued);showBoard(state,queued);setAmbient(!state.current);
@@ -519,3 +525,7 @@ function showPhoto(e){
  };
 }
 function hideFun(id){for(const node of document.querySelectorAll('.shout,.polaroid'))if(node.dataset.id===id){node.classList.add('out');setTimeout(()=>node.remove(),600);}}
+
+// karaoke-server: long titles scroll: the now-playing title/artist at the top and the Up next list.
+const TV_MARQUEES='#song-title,#song-artist,#on-deck li:not(.more)';
+setInterval(()=>marquees(TV_MARQUEES),1500);addEventListener('resize',()=>marquees(TV_MARQUEES));

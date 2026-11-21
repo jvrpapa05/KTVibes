@@ -34,3 +34,15 @@ export function syncRanges(){for(const range of document.querySelectorAll('input
 document.addEventListener('input',e=>{if(e.target.type==='range')syncRanges();});
 // 신곡: songs prepared in the last week, newest first; the newest numbers when none are that recent.
 export function newSongs(songs,now=Date.now()/1000){const week=songs.filter(s=>now-s.prepared<7*86400).sort((a,b)=>b.prepared-a.prepared);return (week.length?week:[...songs].sort((a,b)=>b.number-a.number)).slice(0,10);}
+
+// karaoke-server: long titles scroll instead of ending in "…". A node whose content doesn't fit gets its content
+// wrapped in a strip that glides to the end and back, pausing at each end; content that fits stays still.
+// Pages call marquees(selectors) on a timer, so new titles and resizes are picked up.
+export function marquee(node){
+ let strip=node.firstElementChild;
+ if(!(strip&&strip.classList.contains('mq')&&node.childNodes.length===1)){strip=document.createElement('span');strip.className='mq';strip.append(...node.childNodes);node.append(strip);}
+ const over=strip.scrollWidth-node.clientWidth;
+ if(over>2&&!REDUCED.matches){node.style.setProperty('--mq-shift',`${-over}px`);node.style.setProperty('--mq-time',`${(3+over/40).toFixed(1)}s`);node.classList.add('mq-on');}
+ else node.classList.remove('mq-on');
+}
+export function marquees(selectors){for(const node of document.querySelectorAll(selectors))if(node.getClientRects().length)marquee(node);}  // laid out (offsetParent is null under fixed headers)

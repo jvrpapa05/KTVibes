@@ -1,5 +1,5 @@
 import {classicRemote,toastParts,emptyNote,secondsLeft} from './classic-remote.js';
-import {$,el,connect,api,clock,throttle,prepLabel,syncRanges,REDUCED,thumbnail} from './shared.js';
+import {$,el,connect,api,clock,throttle,prepLabel,syncRanges,REDUCED,thumbnail,marquees} from './shared.js';
 let state,classicUi;
 const SPRING='cubic-bezier(.38,1.21,.22,1)';
 const haptic=pattern=>{try{navigator.vibrate?.(pattern);}catch{}};
@@ -598,3 +598,7 @@ function showReady(row,item){
  const label=row.querySelector('.pct');if(label)label.textContent=item.status==='ready'?'\u2713':`${pct}%`;
 }
 setInterval(()=>{if(!state)return;for(const item of state.upcoming){const row=$('queue').querySelector(`[data-key="${item.key}"]`);if(row)showReady(row,item);}},1000);
+
+// karaoke-server: long titles scroll: queued songs, the now-singing card and the mini player.
+const REMOTE_MARQUEES='#queue [data-key] h3,#dock-title';  // #hero-title already wraps to 3 lines
+setInterval(()=>marquees(REMOTE_MARQUEES),1500);addEventListener('resize',()=>marquees(REMOTE_MARQUEES));
