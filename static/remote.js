@@ -353,6 +353,27 @@ async function pickLyrics(song){
  form.append(input,go);form.onsubmit=e=>{e.preventDefault();input.blur();show(input.value.trim());};
  panel.append(head,form,list);sheet.append(panel);document.body.append(sheet);
  let latest=0;  // a slow earlier lookup must not replace newer results
+ // karaoke-server: applying a version can take a while (for the song on stage the server times every word against
+ // the vocals, and waits if another song is being timed), so show what's happening, then confirm it worked.
+ async function applyLyrics(o,b){
+  for(const other of list.children)other.disabled=true;b.classList.add('busy');
+  const playing=state?.current?.id===song.id,seconds=playing?Math.max(15,Math.round((state.current.duration||200)*.17)):3;
+  const card=el('div',undefined,'lyric-applying'),box=el('div',undefined,'la-box'),title=el('strong','Applying these lyrics…'),
+    note=el('p',playing?'Timing each word to the singer’s voice. Usually under a minute; longer while another song is being prepared.':'Saving your choice…'),
+    bar=el('div',undefined,'la-bar'),fill=el('i'),clock=el('small','0 s','la-clock');
+  bar.append(fill);box.append(title,el('span',o.track||'','la-track'),note,bar,clock);card.append(box);panel.append(card);
+  const started=Date.now(),tick=setInterval(()=>{const t=(Date.now()-started)/1000;fill.style.width=`${Math.min(95,100*t/seconds)}%`;clock.textContent=`${Math.floor(t)} s`;},250);
+  try{
+   await api(`/api/songs/${song.id}/lyrics`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id})});
+   clearInterval(tick);fill.style.width='100%';card.classList.add('done');
+   title.textContent='✓ Lyrics applied';note.textContent=playing?'Showing on the TV now.':'They’ll show when this song plays.';clock.textContent='';haptic([10,40,10]);
+   setTimeout(()=>{shut();toast(`Lyrics for ${song.title} updated`);},1600);
+  }catch(error){
+   clearInterval(tick);card.classList.add('failed');title.textContent='Couldn’t apply these lyrics';note.textContent=error.message;clock.textContent='';
+   const again=el('button','Try again','la-again');again.onclick=()=>{card.remove();for(const other of list.children)other.disabled=false;b.classList.remove('busy');};
+   box.append(again);
+  }
+ }
  async function show(query){
   const mine=++latest;
   const wait=el('p',query?'Searching…':'Looking up every version…','muted lyric-wait'),bar=el('span',undefined,'pbar busy classic-only');
@@ -375,11 +396,7 @@ async function pickLyrics(song){
     const lines=el('span',undefined,'cnt classic-only'),figure=el('span',String(o.lines),'lcd');figure.dataset.ghost='88';lines.append(figure,'LINES',...(gap?[el('span',gap.slice(3),'gap')]:[]));
     top.append(el('b',lang||o.track||'Lyrics'),el('span',(lang?[o.track,o.artist,o.album]:[o.artist,o.album]).filter(Boolean).join(' · ')),...(o.current?[el('em','In use')]:[]),lines);
     b.append(top,...o.preview.map(line=>el('small',line)),el('small',`${o.lines} lines${gap}`,'count'));
-    b.onclick=async()=>{
-     for(const other of list.children)other.disabled=true;b.classList.add('busy');
-     try{await api(`/api/songs/${song.id}/lyrics`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id})});toast(`Lyrics for ${song.title} set to ${o.track||o.language}`);shut();}
-     catch(error){toast(error.message,undefined,'err');for(const other of list.children)other.disabled=false;b.classList.remove('busy');}
-    };
+    b.onclick=()=>applyLyrics(o,b);
     if(query||first||o.current)list.append(b);else extra.push(b);
    }
    if(extra.length){const all=el('button',undefined,'lyric-all');all.append(el('span',`${options.length}개 모두 보기 · `,'classic-only'),`Show all ${options.length} versions`);all.onclick=()=>{all.replaceWith(...extra);};list.append(all);}

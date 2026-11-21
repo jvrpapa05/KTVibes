@@ -307,3 +307,16 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
 .fun-btn.sending{position:relative;overflow:hidden;opacity:1;color:var(--ink);font-variant-numeric:tabular-nums}
 .fun-btn.sending::before{content:'';position:absolute;inset:0;width:calc(var(--p,0)*100%);background:#d7fc7040;transition:width .25s linear;z-index:-1}
 .fun-btn.sending{isolation:isolate}
+/* karaoke-server: "Applying these lyrics…" card over the lyrics picker, then a confirmation */
+.lyric-sheet-panel{position:relative}
+.lyric-applying{position:absolute;inset:0;z-index:5;display:grid;place-items:center;padding:24px;border-radius:inherit;background:#0b0e0de0;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.la-box{width:min(100%,340px);display:flex;flex-direction:column;gap:10px;text-align:center}
+.la-box strong{font:700 22px/1.2 'Space Grotesk',sans-serif}
+.la-box .la-track{color:var(--lime);font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.la-box p{margin:0;color:var(--muted);font-size:14px;line-height:1.4}
+.la-bar{height:8px;border-radius:4px;background:#ffffff1a;overflow:hidden}
+.la-bar i{display:block;height:100%;width:0;background:var(--lime);border-radius:4px;transition:width .25s linear}
+.la-clock{color:var(--muted);font-variant-numeric:tabular-nums}
+.lyric-applying.done strong{color:var(--lime)}
+.lyric-applying.failed strong{color:#ffaaa2}
+.la-again{margin-top:6px;background:var(--lime);color:#1a2215;font-weight:700;border:0}
