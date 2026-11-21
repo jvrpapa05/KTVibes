@@ -51,7 +51,11 @@ def is_music(title: str, duration) -> bool:
 # music videos come first (they give the best room experience), then lyric videos, audio, others and live recordings.
 # YouTube's own order is kept within each kind. Lyric/audio/live words are checked before "official", so an
 # "Official Lyric Video" counts as a lyric video and an "Official Audio" as audio.
-KIND_ORDER = {"official": 0, "lyric": 1, "audio": 2, "other": 3, "live": 4}
+KIND_ORDER = {"official": 0, "lyric": 1, "audio": 2, "other": 3, "cover": 4, "live": 5}
+# karaoke-server: someone else singing it ("(X Cover)", "cover by", "// X cover", 'covers "Song"', "#cover"), so the
+# guide vocals aren't the original singer's. Only in those shapes, so titles like "Cover Me" or "Take Cover" stay.
+COVER = re.compile(r"[(\[][^)\]]*\bcover\b[^)\]]*[)\]]|\bcover(?:ed)? by\b|(?<!take )\bcover\s*(?:$|[|/\-#])|\bcovers\s*[\"“']"
+                   r"|[\"“]cover[\"”]|#cover\b", re.I)
 LYRIC = re.compile(r"\blyrics?\b|lyric video|\(lyric\)|sing-?along|가사|歌詞|歌词", re.I)
 AUDIO = re.compile(r"official audio|\baudio\b|visuali[sz]er", re.I)
 LIVE = re.compile(r"\blive\b|live at|live session|\bconcert\b|\bunplugged\b", re.I)
@@ -60,8 +64,10 @@ LIVE = re.compile(r"\blive\b|live at|live session|\bconcert\b|\bunplugged\b", re
 OFFICIAL = re.compile(r"official\b[^()\[\]|]{0,25}?\bvideo\b|[\[(]\s*official\s*[\])]|[\[(]\s*music video\s*[\])]|\bm/?v\b|official mv|뮤직비디오", re.I)
 
 def kind(title: str, channel: str = "", artist: str = "") -> str:
-    """What sort of upload a search result is: official, lyric, audio, live or other."""
+    """What sort of upload a search result is: official, lyric, audio, cover, live or other."""
     title, channel = title or "", channel or ""
+    if COVER.search(title):
+        return "cover"
     if LYRIC.search(title):
         return "lyric"
     if AUDIO.search(title) or channel.endswith(" - Topic"):

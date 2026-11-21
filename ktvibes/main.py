@@ -6,6 +6,7 @@ import os
 import shutil
 from pathlib import Path
 import socket
+import logging
 import time
 import math
 from urllib.parse import unquote  # karaoke-server: singer names in photo headers are URL-encoded
@@ -197,9 +198,39 @@ async def lyric_options(video_id: str, q: str = Query("", max_length=200)):
 class LyricChoice(BaseModel):
     id: int
 
+_lyric_tasks = set()  # karaoke-server: keeps background lyric timing tasks alive
+
+async def apply_on_stage(video_id: str, folder: Path, lrc: str, job: dict, started: float):
+    """karaoke-server: time the new lyrics against the vocals in the background, then swap them in on the TV.
+    The phone doesn't wait (timing can take a minute, longer while another song is being prepared). If another
+    version is chosen meanwhile, the newest wins."""
+    outcome = "applied"
+    try:
+        lines = lyrics.parse_lrc(lrc)
+        lines = await asyncio.to_thread(worker.timed_lyrics, folder, lrc, stems.path(folder, "vocals"), lines)
+        lyrics.line_starts(lines)
+        if state.lyrics_applying.get(video_id) is not job:
+            outcome = "superseded"
+        elif state.current and state.current["id"] == video_id:
+            state.current.update(lyrics=lines, lyrics_rev=state.current.get("lyrics_rev", 0) + 1)
+            state.offset = 0
+            state.lyrics_sent.clear()
+        else:
+            outcome = "song_ended"  # saved anyway: shown next time it plays
+    except Exception:
+        logging.getLogger("uvicorn.error").exception("Timing new lyrics failed for %s", video_id)
+        outcome = "failed"
+    finally:
+        if state.lyrics_applying.get(video_id) is job:
+            del state.lyrics_applying[video_id]
+        metrics.record("lyrics_chosen", song=video_id, version=job["version"], playing=True, outcome=outcome,
+                       seconds=round(time.monotonic() - started, 1))
+        await state.broadcast()
+
 @app.post("/api/songs/{video_id}/lyrics")
 async def choose_lyrics(video_id: str, choice: LyricChoice):
-    """Save the chosen version; the song on stage switches to it at once."""
+    """Save the chosen version. karaoke-server: the song on stage switches to it once its words are timed, in the
+    background (the reply says "applying": true); other songs use it when they play."""
     folder, meta = song_meta(video_id)
     started = time.monotonic()
     try:
@@ -208,23 +239,20 @@ async def choose_lyrics(video_id: str, choice: LyricChoice):
         raise HTTPException(502, f"Lyrics lookup failed: {exc}") from exc
     if not chosen or not lyrics.STAMP.search(chosen.get("syncedLyrics") or ""):
         raise HTTPException(404, "That lyrics version is no longer available")
-    if state.current and state.current["id"] == video_id:
-        # The song on stage switches right away: time the new lines, then resend lyrics to the TV.
-        lines = lyrics.parse_lrc(chosen["syncedLyrics"])
-        lines = await asyncio.to_thread(worker.timed_lyrics, folder, chosen["syncedLyrics"], stems.path(folder, "vocals"), lines)
-        lyrics.line_starts(lines)
-        if state.current and state.current["id"] == video_id:
-            state.current.update(lyrics=lines, lyrics_rev=state.current.get("lyrics_rev", 0) + 1)
-            state.offset = 0
-            state.lyrics_sent.clear()
-            await state.broadcast()
     (folder / "lyrics.lrc").write_text(chosen["syncedLyrics"], encoding="utf-8")
     meta["lyrics_identity"] = [meta["artist"], meta["title"]]
     meta.pop("lyric_offset", None)  # a nudge for other lyrics no longer fits
     worker.save_meta(folder, meta)
-    metrics.record("lyrics_chosen", song=video_id, version=choice.id, playing=bool(state.current and state.current["id"] == video_id),
+    if state.current and state.current["id"] == video_id:
+        job = {"version": choice.id, "started": time.time()}
+        state.lyrics_applying[video_id] = job
+        task = asyncio.create_task(apply_on_stage(video_id, folder, chosen["syncedLyrics"], job, started))
+        _lyric_tasks.add(task); task.add_done_callback(_lyric_tasks.discard)
+        await state.broadcast()
+        return {"saved": choice.id, "applying": True}
+    metrics.record("lyrics_chosen", song=video_id, version=choice.id, playing=False, outcome="saved",
                    seconds=round(time.monotonic() - started, 1))
-    return {"saved": choice.id}
+    return {"saved": choice.id, "applying": False}
 
 @app.delete("/api/songs/{video_id}")
 async def delete_song(video_id: str):

@@ -22,8 +22,16 @@ const send=message=>sendRaw(PROFILE_ACTIONS.has(message.action)&&singer()?{...me
 function editingOwn(){const me=singer().toLowerCase(),on=(state?.current?.singer||'').toLowerCase();return !!me&&(!state?.current||(!!on&&on!==me));}
 function view(){if(!editingOwn())return state;const mine=state.profiles?.[singer().toLowerCase()];return {...state,...(mine||{})};}
 let skew=0;  // server clock minus ours, for the progress estimate
+let lyricsWatch=null;
 function render(next){
  const before=state;state=next;state.received=Date.now()/1000;if(state.server_time)skew=state.server_time-state.received;
+ // karaoke-server: background lyrics apply finished (or the song moved on)
+ if(lyricsWatch&&!state.lyrics_applying?.[lyricsWatch.id]){
+  const w=lyricsWatch;lyricsWatch=null;
+  if(state.current?.id===w.id&&(state.current.lyrics_rev||0)!==w.rev)toast(`New lyrics for ${w.title} are on the TV`);
+  else if(state.current?.id===w.id)toast(`Couldn’t time the new lyrics for ${w.title} right now; they’re saved for next time`);
+  else toast(`New lyrics for ${w.title} are saved for next time`);
+ }
  // The header pill reports the TV, since that decides whether anything can play.
  $('connection').textContent=!state.player_connected?'TV not connected':state.player_audio?'TV ready':'TV connected · tap Enable sound on it';  // karaoke-server: says it's about the TV, not this phone$('connection').classList.toggle('warn',!state.player_audio);$('connection').classList.toggle('off',!state.player_connected);
  document.body.dataset.theme=state.theme||'default';showNow(!before);showControls(before);showQueue(before);showClassic();classicUi?.render(state);
@@ -308,7 +316,7 @@ const enqueue=song=>api('/api/queue',{method:'POST',headers:{'Content-Type':'app
 const ICONS={add:'<path d="M12 5v14M5 12h14"/>',added:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',failed:'<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/>'};
 function icon(node,name){node.className=`result-icon ${name}`;node.innerHTML=`<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;}
 // One tap queues the song with the artist/title parsed from YouTube (or confirmed earlier, for recent songs).
-const KIND_LABEL={official:'Official video',lyric:'Lyric video',audio:'Audio',live:'Live'};
+const KIND_LABEL={official:'Official video',lyric:'Lyric video',audio:'Audio',cover:'Cover',live:'Live'};
 function showResult(song,list=$('results'),wrap=row=>row,index=-1){
  const b=el('button',undefined,index<0?'result':'result enter');if(index>=0)b.style.setProperty('--i',index);
  const image=el('img');image.src=song.thumbnail;image.alt='';const info=el('div');const title=el('strong',song.title);if(song.cached)title.append(el('span','READY','tag'));const note=el('small',undefined,'result-note classic-only');const meta=el('small',`${song.channel} · ${clock(song.duration)}`);
@@ -368,10 +376,17 @@ async function pickLyrics(song){
   bar.append(fill);box.append(title,el('span',o.track||'','la-track'),note,bar,clock);card.append(box);panel.append(card);
   const started=Date.now(),tick=setInterval(()=>{const t=(Date.now()-started)/1000;fill.style.width=`${Math.min(95,100*t/seconds)}%`;clock.textContent=`${Math.floor(t)} s`;},250);
   try{
-   await api(`/api/songs/${song.id}/lyrics`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id})});
-   clearInterval(tick);fill.style.width='100%';card.classList.add('done');
-   title.textContent='✓ Lyrics applied';note.textContent=playing?'Showing on the TV now.':'They’ll show when this song plays.';clock.textContent='';haptic([10,40,10]);
-   setTimeout(()=>{shut();toast(`Lyrics for ${song.title} updated`);},1600);
+   const saved=await api(`/api/songs/${song.id}/lyrics`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:o.id})});
+   clearInterval(tick);fill.style.width='100%';card.classList.add('done');clock.textContent='';haptic([10,40,10]);
+   // karaoke-server: the song on stage is timed in the background; this phone hears when the TV switches
+   if(saved.applying){
+    title.textContent='✓ Lyrics saved';note.textContent=`The TV switches to them in about ${seconds<60?`${seconds} s`:`${Math.round(seconds/60)} min`}. You can close this.`;
+    lyricsWatch={id:song.id,title:song.title,rev:state?.current?.lyrics_rev||0};
+    setTimeout(shut,2200);
+   }else{
+    title.textContent='✓ Lyrics applied';note.textContent='They’ll show when this song plays.';
+    setTimeout(()=>{shut();toast(`Lyrics for ${song.title} updated`);},1600);
+   }
   }catch(error){
    clearInterval(tick);card.classList.add('failed');title.textContent='Couldn’t apply these lyrics';note.textContent=error.message;clock.textContent='';
    const again=el('button','Try again','la-again');again.onclick=()=>{card.remove();for(const other of list.children)other.disabled=false;b.classList.remove('busy');};

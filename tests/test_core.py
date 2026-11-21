@@ -449,6 +449,55 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
             metrics.record('cannot_write')  # must not raise
             metrics._path = None
 
+    async def test_lyrics_for_the_song_on_stage_apply_in_the_background_newest_wins(self):
+        # karaoke-server: the phone gets its answer at once; the TV switches when the words are timed.
+        import threading
+        from unittest import mock
+        from ktvibes import main
+        LRC = {1: "[00:01.00]first version", 2: "[00:01.00]second version"}
+        gates = {1: threading.Event(), 2: threading.Event()}
+        def slow_timing(folder, raw, vocals, lines):
+            gates[1 if "first" in raw else 2].wait(5)
+            return lines
+        async def record(version):
+            return {"syncedLyrics": LRC[version]}
+        with tempfile.TemporaryDirectory() as folder:
+            song = Path(folder) / "aaaaaaaaaaa"; song.mkdir()
+            (song / "meta.json").write_text(json.dumps({"artist": "A", "title": "T", "duration": 100}))
+            state = State()
+            async def no_broadcast(): pass
+            state.broadcast = no_broadcast
+            state.current = {"id": "aaaaaaaaaaa", "key": "k", "title": "T", "lyrics": [], "lyrics_rev": 0}
+            with mock.patch.object(main, "CACHE", Path(folder)), mock.patch.object(main, "state", state), \
+                 mock.patch.object(main.lyrics, "record", record), mock.patch.object(main.worker, "timed_lyrics", slow_timing):
+                first = await asyncio.wait_for(main.choose_lyrics("aaaaaaaaaaa", main.LyricChoice(id=1)), 2)
+                self.assertTrue(first["applying"])
+                self.assertIn("aaaaaaaaaaa", state.snapshot()["lyrics_applying"])
+                self.assertEqual(state.current["lyrics_rev"], 0)            # not swapped yet
+                await main.choose_lyrics("aaaaaaaaaaa", main.LyricChoice(id=2))
+                gates[2].set()
+                for _ in range(100):
+                    if state.current["lyrics_rev"]: break
+                    await asyncio.sleep(0.02)
+                gates[1].set()
+                await asyncio.gather(*main._lyric_tasks)
+            self.assertEqual(state.current["lyrics_rev"], 1)                # the older version didn't overwrite it
+            self.assertEqual(state.current["lyrics"][0]["text"], "second version")
+            self.assertEqual(state.lyrics_applying, {})
+            self.assertIn("second version", (song / "lyrics.lrc").read_text())
+
+    def test_covers_are_labelled_but_songs_named_cover_are_not(self):
+        # karaoke-server: real YouTube titles (2026-11-21)
+        from ktvibes.youtube import kind, KIND_ORDER
+        for title in ("Teddy Swims - Someone You Loved (Lewis Capaldi Cover)", "Tadhana // Up Dharma Down (Cover)",
+                      "Lewis Capaldi - Someone You Loved // Brittany Maggs cover", "Someone You Loved - Lewis Capaldi (Cover By: Davina Michelle)",
+                      'KZ Tandingan covers "Tadhana" (Up Dharma Down) on Wish 107.5 Bus', "TADHANA | Up Dharma Down (Soulful R&B cover) #REINEMUSIC"):
+            self.assertEqual(kind(title), "cover", title)
+        for title, want in (("Cover Me - Bruce Springsteen Lyrics", "lyric"), ("Twenty One Pilots - Take Cover", "other"),
+                            ("The Strokes - Under Cover of Darkness (Official Video)", "official")):
+            self.assertEqual(kind(title), want, title)
+        self.assertGreater(KIND_ORDER["cover"], KIND_ORDER["other"])
+
     def test_singer_names_are_unique_per_phone_until_idle(self):
         state = State()
         self.assertEqual(state.claim_singer('  Anna ', 'phone-1'), 'Anna')
