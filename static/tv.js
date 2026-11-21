@@ -265,7 +265,7 @@ function applyTempo(){const speed=state?.speed??1;for(const media of [music,voic
 function applyGain(){applyTempo();if(!musicGain)return;musicGain.gain.value=(state?.music??1)*stemGain;voiceGain.gain.value=(state?.vocal??0.1)*stemGain;}
 // The theme can be picked before sound is on; it switches the whole room (TV and phones).
 for(const b of document.querySelectorAll('[data-theme-pick]'))b.onclick=()=>send({action:'theme',value:b.dataset.themePick});
-$('enable-button').onclick=async()=>{
+async function enableSound(){
  try{
   if(!context){
    context=new AudioContext();musicGain=context.createGain();voiceGain=context.createGain();
@@ -276,7 +276,19 @@ $('enable-button').onclick=async()=>{
   }
   await context.resume();enabled=true;send({action:'audio',value:true});$('enable').hidden=true;$('audio-error').textContent='';
  }catch(e){$('audio-error').textContent=e.message;}
-};
+}
+$('enable-button').onclick=enableSound;
+// karaoke-server: skip the Enable sound click when this browser already allows sound for the site (Chrome/Edge
+// "Sound: Allow" site setting or --autoplay-policy=no-user-gesture-required; Firefox "Autoplay: Allow Audio and
+// Video"). Without a click the AudioContext stays suspended, so the prompt shows as before.
+(async()=>{
+ try{
+  const probe=new AudioContext();
+  await Promise.race([probe.resume(),new Promise(r=>setTimeout(r,400))]);
+  const allowed=probe.state==='running';probe.close();
+  if(allowed)await enableSound();
+ }catch{}
+})();
 $('fullscreen').onclick=()=>{const result=document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen();result.catch(e=>error(e.message));};
 addEventListener('fullscreenchange',()=>{const full=!!document.fullscreenElement,label=full?'Exit fullscreen':'Fullscreen';$('fullscreen').classList.toggle('full',full);$('fullscreen').setAttribute('aria-label',label);$('fullscreen').title=label;});
 // karaoke-server: no Music/Vocals sliders on the TV; phones control the mix (and each singer's profile).
