@@ -622,7 +622,8 @@ $('emoji-done').onclick=()=>{$('emoji-box').hidden=true;};
 $('emoji-form').onsubmit=e=>{e.preventDefault();
  const emoji=oneEmoji($('emoji-input').value),list=myEmoji();
  if(!emoji)return emojiError('Pick one emoji from your emoji keyboard');
- if(list.includes(emoji)||['👏','🔥','🎉','💚'].includes(emoji))return emojiError('You already have that one');
+ if(list.includes(emoji)||['👏','🔥'].includes(emoji))  // karaoke-server: only 👏 and 🔥 built in, to encourage your own
+ return emojiError('You already have that one');
  if(list.length>=EMOJI_MAX)return emojiError(`Up to ${EMOJI_MAX}: remove one first (tap it above)`);
  saveEmoji([...list,emoji]);$('emoji-input').value='';emojiError('');haptic(8);};
 showMyEmoji();
