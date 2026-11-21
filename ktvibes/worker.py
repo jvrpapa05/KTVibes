@@ -63,7 +63,12 @@ def fetch_video(video_id, folder, progress):
         log.exception("Video unavailable for %s", video_id)
         return "Video unavailable; using the stage background."
 
-def timed_lyrics(folder: Path, raw: str, samples_path: Path, lines: list[dict]) -> list[dict]:
+# karaoke-server: lyrics whose recording is as long as this video (within MATCHED_LENGTH s) are already in place, so
+# timing may only nudge them by that much. Unlimited, it moved a perfectly matched Elvis song 47 s late (onto a
+# repeat of the melody); a big shift is only for videos that really are longer (a story intro).
+MATCHED_LENGTH = 5.0
+
+def timed_lyrics(folder: Path, raw: str, samples_path: Path, lines: list[dict], lyric_duration: float | None = None) -> list[dict]:
     """Word timing and guides for these lyrics, reused from timed.json when the LRC text is unchanged."""
     key = f"{TIMING_VERSION}:{hashlib.sha256(raw.encode()).hexdigest()}"
     try:
@@ -75,7 +80,8 @@ def timed_lyrics(folder: Path, raw: str, samples_path: Path, lines: list[dict]) 
         pass
     samples, rate = sf.read(samples_path, dtype="float32")
     energy = lyrics.envelope(samples, rate)
-    if shift := lyrics.find_shift(lines, energy):
+    matched = bool(lyric_duration) and abs(len(samples) / rate - lyric_duration) <= MATCHED_LENGTH
+    if shift := (lyrics.find_shift(lines, energy, limit=MATCHED_LENGTH, far=False) if matched else lyrics.find_shift(lines, energy)):
         log.info("Lyrics for %s shifted %+.2fs to match the vocals", folder.name, shift)
         lyrics.shift_lines(lines, shift)
     if any(moved := lyrics.shift_sections(lines, energy)):
@@ -241,6 +247,7 @@ async def run(state, cache: Path):
                 try:
                     result = await lyrics.fetch(*identity, item["duration"], (meta.get("source_title") or "",))
                     raw, item["lyrics"] = result["raw"], result["lines"]
+                    meta["lyrics_duration"] = result.get("duration")
                     # A miss is remembered for a week, so a later LRCLIB addition is still picked up.
                     meta["lyrics_identity"], meta["lyrics_checked"] = identity, time.time()
                     meta.pop("lyric_offset", None)  # a nudge for other lyrics no longer fits
@@ -253,7 +260,7 @@ async def run(state, cache: Path):
                     item["lyrics_warning"] = "Lyrics unavailable; audio is ready."
             if item["lyrics"]:
                 try:
-                    item["lyrics"] = await asyncio.to_thread(timed_lyrics, folder, raw, stems.path(folder, "vocals"), item["lyrics"])
+                    item["lyrics"] = await asyncio.to_thread(timed_lyrics, folder, raw, stems.path(folder, "vocals"), item["lyrics"], meta.get("lyrics_duration"))
                     lyrics.line_starts(item["lyrics"])  # cheap, so kept out of the timing cache
                 except Exception:
                     log.exception("Word timing unavailable for %s", item["id"])

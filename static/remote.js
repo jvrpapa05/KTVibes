@@ -322,6 +322,8 @@ function showResult(song,list=$('results'),wrap=row=>row,index=-1){
  const image=el('img');image.src=song.thumbnail;image.alt='';const info=el('div');const title=el('strong',song.title);if(song.cached)title.append(el('span','READY','tag'));const note=el('small',undefined,'result-note classic-only');const meta=el('small',`${song.channel} · ${clock(song.duration)}`);
  // karaoke-server: what kind of upload it is (results come official videos first)
  if(KIND_LABEL[song.kind])meta.prepend(el('span',KIND_LABEL[song.kind],`kind kind-${song.kind}`),' ');
+ // karaoke-server: synced lyrics exist for this exact length, so they'll line up (these results come first)
+ if(song.lyrics_match)meta.prepend(el('span','✓ Lyrics','kind kind-lyrics'),' ');
  info.append(title,meta,note);const status=el('span');icon(status,'add');b.append(image,info,status);
  // Classic swaps the channel line for what happened to the add.
  const mark=(name,...text)=>{b.classList.remove('added','failed');b.classList.add(name);note.replaceChildren(...text);};

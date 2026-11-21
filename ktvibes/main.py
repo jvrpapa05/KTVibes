@@ -97,14 +97,30 @@ async def suggest(q: str = Query(min_length=1, max_length=200)):
     except Exception:
         return []  # completions are a nicety; never surface their failures
 
+async def lyric_records(q: str) -> list[dict]:
+    """karaoke-server: every LRCLIB record for this search, with its real length for synced ones; [] if slow/down."""
+    try:
+        async with lyrics.lrclib() as client:
+            response = await asyncio.wait_for(client.get("/api/search", params={"q": q}), 6)
+        records = response.json()
+        lyrics.real_lengths([c for c in records if c.get("syncedLyrics")])
+        return records
+    except Exception:
+        logging.getLogger("uvicorn.error").warning("LRCLIB lookup for search %r failed", q, exc_info=True)
+        return []
+
 @app.get("/api/search")
 async def search(q: str = Query(min_length=1, max_length=200), page: int = Query(0, ge=0, le=9)):
     try:
-        results = await asyncio.to_thread(youtube.search, q, page)
+        found, records = await asyncio.gather(asyncio.to_thread(youtube.search, q, page), lyric_records(q))
+        youtube.names_from_records(found, records)
+        youtube.mark_lyrics(found, [(youtube.song_name(c.get("trackName", "")), c["length"]) for c in records if c.get("length")])
+        results = youtube.order_results(found)
     except Exception as exc:
         metrics.record("search_failed", q=q, page=page, error=str(exc)[-200:], bot_check=bool(youtube.BOT_CHECK.search(str(exc))))
         raise HTTPException(502, f"YouTube search failed: {youtube.explain(exc)}") from exc
-    metrics.record("search", q=q, page=page, results=len(results), kinds=[r.get("kind") for r in results])
+    metrics.record("search", q=q, page=page, results=len(results), kinds=[r.get("kind") for r in results],
+                   lyrics_match=[bool(r.get("lyrics_match")) for r in results], lyric_records=len(records))
     # Prepared songs start right away; the remote marks them.
     cached = prepared_songs()
     return [{**result, "cached": result["id"] in cached} for result in results]
@@ -207,7 +223,7 @@ async def apply_on_stage(video_id: str, folder: Path, lrc: str, job: dict, start
     outcome = "applied"
     try:
         lines = lyrics.parse_lrc(lrc)
-        lines = await asyncio.to_thread(worker.timed_lyrics, folder, lrc, stems.path(folder, "vocals"), lines)
+        lines = await asyncio.to_thread(worker.timed_lyrics, folder, lrc, stems.path(folder, "vocals"), lines, job.get("duration"))
         lyrics.line_starts(lines)
         if state.lyrics_applying.get(video_id) is not job:
             outcome = "superseded"
@@ -242,9 +258,11 @@ async def choose_lyrics(video_id: str, choice: LyricChoice):
     (folder / "lyrics.lrc").write_text(chosen["syncedLyrics"], encoding="utf-8")
     meta["lyrics_identity"] = [meta["artist"], meta["title"]]
     meta.pop("lyric_offset", None)  # a nudge for other lyrics no longer fits
+    lyrics.real_lengths([chosen])  # karaoke-server: see worker.MATCHED_LENGTH (alone, only an impossible length is caught)
+    meta["lyrics_duration"] = chosen.get("length")
     worker.save_meta(folder, meta)
     if state.current and state.current["id"] == video_id:
-        job = {"version": choice.id, "started": time.time()}
+        job = {"version": choice.id, "started": time.time(), "duration": meta["lyrics_duration"]}
         state.lyrics_applying[video_id] = job
         task = asyncio.create_task(apply_on_stage(video_id, folder, chosen["syncedLyrics"], job, started))
         _lyric_tasks.add(task); task.add_done_callback(_lyric_tasks.discard)

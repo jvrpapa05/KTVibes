@@ -220,7 +220,7 @@ def nearest_peak(shifts, scores) -> int:
              and scores[i] >= scores[best] * 2 / 3]
     return min(peaks + [best], key=lambda i: (abs(shifts[i]), -scores[i]))
 
-def find_shift(lines: list[dict], energy, hop: float = 0.05, limit: float = 30.0) -> float:
+def find_shift(lines: list[dict], energy, hop: float = 0.05, limit: float = 30.0, far: bool = True) -> float:
     """Seconds to add to every stamp so the lines start where the vocals do.
 
     LRCLIB records follow the album track, and a music video often adds an intro;
@@ -250,7 +250,7 @@ def find_shift(lines: list[dict], energy, hop: float = 0.05, limit: float = 30.0
     # from 5.8 s). Later shifts are searched only when the stamps fit badly as they are and nothing fits
     # nearer, so a song that already fits can't latch onto a far repeat of its chorus.
     later = len(energy) * hop - starts[0]
-    if in_place >= 0.25 or later <= limit:
+    if not far or in_place >= 0.25 or later <= limit:
         return 0.0
     return search(np.arange(limit + hop, later + hop / 2, hop))
 
@@ -432,15 +432,45 @@ def native(candidate: dict, want: str | None = None) -> bool:
     found = script(candidate.get("syncedLyrics") or "")
     return found == want if want else found != "latin"
 
+# karaoke-server: LRCLIB's stated durations are often wrong: the same album timing gets uploaded as 3:18, 3:52, 5:02...
+# and once with a 9:31 music video's length, which would make it look like a perfect fit for that video. The timing
+# itself tells the truth: records with the same first and last line are the same timing, so their typical duration
+# is the real length of the recording it was timed to. Records whose lines run past their stated end are dropped.
+def span(candidate: dict) -> tuple[float, float] | None:
+    stamps = [int(m) * 60 + float(s) for m, s in re.findall(r"\[(\d+):(\d+(?:\.\d+)?)\]", candidate.get("syncedLyrics") or "")]
+    return (min(stamps), max(stamps)) if stamps else None
+
+def real_lengths(records: list[dict]) -> None:
+    """Set record["length"]: the real length of the recording its timing fits, or None if it can't fit any."""
+    import statistics
+    groups = []
+    for c in records:
+        s, stated = span(c), float(c.get("duration") or 0)
+        c["length"] = None
+        if not s or stated <= 0 or s[1] > stated + 3:
+            continue
+        for g in groups:
+            if abs(g["first"] - s[0]) <= 1.5 and abs(g["last"] - s[1]) <= 1.5:
+                g["members"].append(c)
+                break
+        else:
+            groups.append({"first": s[0], "last": s[1], "members": [c]})
+    for g in groups:
+        typical = statistics.median(float(c["duration"]) for c in g["members"])
+        for c in g["members"]:
+            # one odd label in a group is corrected to the group's length; agreeing records keep their own
+            c["length"] = float(c["duration"]) if abs(float(c["duration"]) - typical) <= 3 else typical
+
 def rank(candidate: dict, titles: list[str], duration: float, want: str | None = None) -> tuple:
     track = candidate.get("trackName", "").casefold()
     return (not any(t.casefold() in track for t in titles), "instrumental" in track, want is not None and not native(candidate, want),
-            abs(float(candidate["duration"]) - duration))
+            abs(float(candidate.get("length") or candidate["duration"]) - duration))
 
 def fits(candidate: dict, duration: float) -> bool:
     # Some LRCLIB records put untimed text in syncedLyrics; require real timestamps.
     # Music videos often run a few seconds longer than the album track; alignment re-times the lines.
-    return bool(STAMP.search(candidate.get("syncedLyrics") or "")) and abs(float(candidate.get("duration") or 0) - duration) <= 10
+    length = candidate.get("length", candidate.get("duration")) or 0  # karaoke-server: real length when known
+    return bool(STAMP.search(candidate.get("syncedLyrics") or "")) and abs(float(length) - duration) <= 10
 
 def lrclib():
     import httpx
@@ -494,6 +524,7 @@ async def candidates(artist: str, title: str, duration: float, hints: tuple[str,
                     await asyncio.sleep(1 + attempt)
         if failure and not found:
             raise failure
+    real_lengths(found)
     unique = {c.get("id") or id(c): c for c in found if fits(c, duration)}
     if not want:
         # Latin-only names (say "NewJeans - Super Shy"): the original language usually has the most records;
@@ -506,7 +537,8 @@ async def candidates(artist: str, title: str, duration: float, hints: tuple[str,
 async def fetch(artist: str, title: str, duration: float, hints: tuple[str, ...] = ()) -> dict:
     matches = await candidates(artist, title, duration, hints)
     raw = matches[0].get("syncedLyrics", "") if matches else ""
-    return {"raw": raw, "lines": parse_lrc(raw)}
+    # karaoke-server: the length of the recording these lyrics were timed to (see worker.timed_lyrics)
+    return {"raw": raw, "lines": parse_lrc(raw), "duration": matches[0].get("length") if matches else None}
 
 if __name__ == "__main__":
     print(json.dumps(asyncio.run(fetch(sys.argv[1], sys.argv[2], float(sys.argv[3]))), ensure_ascii=False, indent=2))

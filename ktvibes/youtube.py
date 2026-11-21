@@ -91,7 +91,89 @@ def search(query: str, page: int = 0, size: int = 10) -> list[dict]:
             for e in result.get("entries", []) if e and ID.fullmatch(e.get("id", "")) and is_music(e.get("title", ""), e.get("duration"))]
     for r in results:
         r["kind"] = kind(r["title"], r["channel"], r["parsed"].get("artist", ""))
-    return order_results(results)
+    return order_results(results)  # karaoke-server: main.search orders again after the lyrics check
+
+# karaoke-server: synced lyrics fit a video when it is as long as the recording they were timed to. Measured on
+# 1,000 top songs plus our library (research/search-1000 in the private repo): within a few seconds the first line
+# lands on the singer; a longer video (story intro, extra scene) puts every line early.
+LYRICS_TOLERANCE = 3.0
+
+def song_name(title: str) -> str:
+    """A song's name for matching versions: no "ft. X", "(Remastered)", "- From the film", case or punctuation."""
+    title = re.split(r"\s+(?:ft\.?|feat\.?|featuring|with)\s|[(\[]|\s-\s", (title or "").casefold())[0]
+    return re.sub(r"\W+", "", title)
+
+def mark_lyrics(results: list[dict], records: list[tuple[str, float]], tolerance: float = LYRICS_TOLERANCE) -> None:
+    """Flag results with synced lyrics of the same song and length (records: (song_name, seconds) from LRCLIB)."""
+    for r in results:
+        name = song_name((r.get("parsed") or {}).get("title", "")) or song_name(r.get("title", ""))
+        whole = re.sub(r"\W+", "", (r.get("title") or "").casefold())
+        # the song's name, or (for titles like "Adele   Hello" that don't split) found inside the title
+        same = lambda track: track == name or (len(track) >= 4 and track in whole)
+        diffs = [abs((r.get("duration") or 0) - seconds) for track, seconds in records if track and same(track)]
+        best = min(diffs, default=None)
+        # a cover or live version can be as long as the record and still be sung differently: never "matching"
+        r["lyrics_match"] = best is not None and best <= tolerance and bool(r.get("duration")) and r.get("kind") not in ("cover", "live")
+        if r["lyrics_match"]:
+            r["lyrics_diff"] = round(best, 1)
+
+# karaoke-server: names read off a YouTube title were right only ~76% of the time on 1,000 top songs (reversed
+# "Song - Artist", the channel taken as the artist, "Audio"/"HQ"/"Remastered 2023" left in). LRCLIB's records for the
+# same search carry clean artist and song names; a result that clearly is one of them takes those names.
+LABELS = re.compile(r"official|lyrics?\b|\bvideo\b|\baudio\b|\bm/?v\b|\bhd\b|\bhq\b|vevo|- topic|karaoke", re.I)
+
+def lead_artist(artist: str) -> str:
+    return re.sub(r"\W+", "", re.split(r",|&| x | and | feat\.? | ft\.? | with ", (artist or "").casefold())[0])
+
+def names_from_records(results: list[dict], records: list[dict]) -> None:
+    """records: LRCLIB rows with "artistName"/"trackName". Sets r["parsed"] (keeping the old one as "guessed")."""
+    from collections import Counter
+    votes = {}
+    for c in records:
+        name, by = (c.get("trackName") or "").strip(), (c.get("artistName") or "").strip()
+        track, artist = song_name(name), lead_artist(by)
+        # records uploaded from a video player carry its title ("Ed Sheeran - Shape Of You (Official Video)")
+        if len(track) < 2 or len(artist) < 2 or track == artist or " - " in name or LABELS.search(name) or LABELS.search(by) \
+                or artist in re.sub(r"\W+", "", name.casefold()):  # "Ed Sheeran-Perfect": the artist glued into the song
+            continue
+        votes.setdefault(track, {}).setdefault(artist, Counter())[(by, name)] += 1
+    # records with artist and song the wrong way round: a "song" that is also an artist's name is not one
+    # Which way round is a pair? The search's own YouTube titles mostly read "Artist - Song", so the side most of them
+    # put first is the artist (records outvote them only when YouTube can't tell).
+    pairs = Counter()
+    for r in results:
+        parsed = r.get("parsed") or {}
+        pairs[(lead_artist(parsed.get("artist", "")), song_name(parsed.get("title", "")))] += 2
+    for track, artists in votes.items():
+        for artist, spellings in artists.items():
+            pairs[(artist, track)] += sum(spellings.values())
+    for track in list(votes):
+        for artist in list(votes[track]):
+            if pairs[(track, artist)] > pairs[(artist, track)]:
+                del votes[track][artist]
+        if not votes[track]:
+            del votes[track]
+    # the spelling most records agree on (album uploads outnumber the odd one), then the shortest
+    known = {track: {artist: dict(zip(("artistName", "trackName"), min(spellings, key=lambda k: (-spellings[k], len(k[1])))))
+                     for artist, spellings in artists.items()} for track, artists in votes.items()}
+    for r in results:
+        parsed = r.get("parsed") or {}
+        title = re.sub(r"\W+", "", (r.get("title") or "").casefold())
+        text = title + re.sub(r"\W+", "", (r.get("channel") or "").casefold())
+        exact = {song_name(parsed.get("title", "")), song_name(parsed.get("artist", ""))}  # either way round
+        best = None
+        for track, artists in known.items():
+            if track not in exact and not (len(track) >= 4 and track in title):
+                continue
+            named = [c for a, c in artists.items() if a in text]
+            # the artist must be in the title or channel
+            # (an artist is only filled in when the title names none: "Eye of the Tiger" alone)
+            chosen = named[0] if len(named) == 1 else next(iter(artists.values())) if not named and len(artists) == 1 \
+                and track == song_name(parsed.get("title", "")) and not parsed.get("artist") else None
+            if chosen and (best is None or len(track) > len(best[0])):
+                best = (track, chosen)
+        if best:
+            r["parsed"] = {"artist": best[1]["artistName"], "title": best[1]["trackName"], "guessed": parsed}
 
 def order_results(results: list[dict]) -> list[dict]:
     """Group by kind (official first), keeping YouTube's order within each kind. karaoke-server: when one song has
@@ -106,9 +188,14 @@ def order_results(results: list[dict]) -> list[dict]:
     for i, r in enumerate(results):
         first.setdefault(song(r), i)
     def key(r):
-        if r["kind"] != "official":
-            return (KIND_ORDER[r["kind"]], 0, 0)
-        return (0, first[song(r)], r.get("duration") or float("inf"))
+        # karaoke-server: results whose length matches synced lyrics first (official ones first, then lyric videos...),
+        # then the rest as before (covers and live versions are never marked as matching: see mark_lyrics)
+        kind = r.get("kind", "other")
+        if r.get("lyrics_match"):
+            return (0, KIND_ORDER[kind], r.get("lyrics_diff", 0), 0)
+        if kind != "official":
+            return (1, KIND_ORDER[kind], 0, 0)
+        return (1, 0, first[song(r)], r.get("duration") or float("inf"))
     return sorted(results, key=key)
 
 def _extract(options: dict, video_id: str, progress=None, attempts: int = 4) -> dict:

@@ -456,7 +456,7 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         from ktvibes import main
         LRC = {1: "[00:01.00]first version", 2: "[00:01.00]second version"}
         gates = {1: threading.Event(), 2: threading.Event()}
-        def slow_timing(folder, raw, vocals, lines):
+        def slow_timing(folder, raw, vocals, lines, lyric_duration=None):
             gates[1 if "first" in raw else 2].wait(5)
             return lines
         async def record(version):
@@ -508,6 +508,77 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         out = order_results([r("a", "official", "Telephone ft. Beyoncé", 571), r("b", "official", "Telephone ft. Beyoncé (Explicit) ft. Beyoncé", 572),
                              r("c", "official", "Telephone Feat Beyoncé", 243), r("d", "official", "Poker Face", 214)])
         self.assertEqual([x["id"] for x in out], ["c", "a", "b", "d"])
+
+    def test_matched_length_lyrics_cannot_jump_a_verse(self):
+        # karaoke-server: lyrics from a recording as long as the video only get nudged (Elvis was moved 47 s late).
+        import numpy as np, soundfile as sf
+        from ktvibes import worker, lyrics
+        rate = 16000; hop = 0.05
+        # vocals: a phrase every 8 s from 8 s on, as the LRC says; the melody repeats, so a far shift also "fits"
+        y = np.zeros(rate * 200, np.float32)
+        for start in range(8, 190, 8): y[start * rate:(start + 3) * rate] = 0.3 * np.sin(np.arange(3 * rate) * 0.2)
+        raw = "\n".join(f"[{s // 60:02d}:{s % 60:02d}.00]line {i}" for i, s in enumerate(range(8, 190, 8)))
+        with tempfile.TemporaryDirectory() as folder:
+            sf.write(f"{folder}/vocals.wav", y, rate)
+            seen = {}
+            real = lyrics.find_shift
+            def spy(lines, energy, *a, **k):
+                seen.update(k); return real(lines, energy, *a, **k)
+            with unittest.mock.patch.object(lyrics, "find_shift", spy), unittest.mock.patch.object(worker.align, "align", lambda *a: None):
+                worker.timed_lyrics(Path(folder), raw, Path(f"{folder}/vocals.wav"), lyrics.parse_lrc(raw), 201.0)
+            self.assertEqual((seen.get("limit"), seen.get("far")), (worker.MATCHED_LENGTH, False))
+            seen.clear(); (Path(folder) / "timed.json").unlink()
+            with unittest.mock.patch.object(lyrics, "find_shift", spy), unittest.mock.patch.object(worker.align, "align", lambda *a: None):
+                worker.timed_lyrics(Path(folder), raw, Path(f"{folder}/vocals.wav"), lyrics.parse_lrc(raw), 230.0)
+            self.assertEqual(seen, {})   # lengths differ (a story intro?): the full search, as before
+
+    def test_results_with_matching_lyrics_come_first(self):
+        # karaoke-server: goal (user, 2026-11-21): top = the official video, with synced lyrics that match it
+        from ktvibes.youtube import mark_lyrics, order_results, song_name
+        r = lambda i, kind, title, d: {"id": i, "kind": kind, "title": title, "duration": d, "parsed": {"title": title}}
+        results = [r("story", "official", "Telephone ft. Beyoncé", 571), r("lyric", "lyric", "Telephone", 221),
+                   r("edit", "official", "Telephone", 243), r("live", "live", "Telephone", 221), r("other", "official", "Poker Face", 238)]
+        mark_lyrics(results, [(song_name("Telephone"), 221.0), (song_name("Telephone"), 244.0), (song_name("Poker Face (Remix)"), 400.0)])
+        self.assertEqual([x["id"] for x in order_results(results)], ["edit", "lyric", "story", "other", "live"])
+        self.assertEqual(song_name("Bad Blood (Taylor's Version) - From The Vault ft. Kendrick"), "badblood")
+        self.assertFalse(next(x for x in results if x["id"] == "live")["lyrics_match"])  # same length, still live
+        mark_lyrics(results, [])  # LRCLIB down: the order is as before
+        self.assertEqual([x["id"] for x in order_results(results)][:2], ["edit", "story"])
+
+    def test_real_length_of_lyrics_comes_from_their_timing_not_the_label(self):
+        # karaoke-server: real LRCLIB records for Lady Gaga "Telephone" (2026-11-21), cut down to first/last lines
+        from ktvibes.lyrics import real_lengths, fits
+        rec = lambda i, d, first, last: {"id": i, "duration": d, "syncedLyrics": f"[{int(first // 60):02d}:{first % 60:05.2f}]a\n[{int(last // 60):02d}:{last % 60:05.2f}]b"}
+        records = [rec("album1", 220, 8.8, 219.3), rec("album2", 221, 8.8, 218.9), rec("album3", 221, 8.1, 218.5), rec("album4", 222, 7.9, 218.0),
+                   rec("album_as_video", 571, 8.0, 218.0),   # album timing labelled with the 9:31 video's length
+                   rec("video", 571, 174.7, 566.0),          # really timed to the story video
+                   rec("impossible", 220, 173.7, 568.9)]     # lines run past its own end
+        real_lengths(records)
+        got = {r["id"]: r["length"] for r in records}
+        self.assertEqual(got["album_as_video"], 221)
+        self.assertEqual(got["video"], 571)
+        self.assertIsNone(got["impossible"])
+        self.assertEqual(got["album1"], 220)
+        self.assertFalse(fits(records[4], 571))   # no longer a "perfect fit" for the 9:31 video
+        self.assertTrue(fits(records[5], 571))
+
+    def test_search_results_take_clean_names_from_lyrics_records(self):
+        # karaoke-server: real cases from the 1,000-song study (2026-11-21)
+        from ktvibes.youtube import names_from_records
+        res = lambda title, channel, artist, song: {"title": title, "channel": channel, "parsed": {"artist": artist, "title": song}}
+        results = [res("Shake It Off - Taylor Swift (Lyrics)", "Pillow", "Shake It Off", "Taylor Swift"),        # reversed
+                   res("XXXTENTACION - Moonlight Audio", "Yung Dagger X", "XXXTENTACION", "Moonlight Audio"),   # junk kept
+                   res("Hozier- Take Me To Church (Audio)", "Music Audios", "Music Audios", "Hozier- Take Me To Church"),
+                   res("Eye of the Tiger", "", "", "Eye of the Tiger"),                                         # no artist
+                   res("Adele - Hello (Live at the NRJ Awards)", "Adele", "Adele", "Hello")]
+        records = [{"artistName": "Taylor Swift", "trackName": "Shake It Off"}, {"artistName": "Taylor Swift", "trackName": "Shake It Off"},
+                   {"artistName": "Taylor Swift", "trackName": "Taylor Swift - Shake It Off (Official Video)"},   # player upload: ignored
+                   {"artistName": "XXXTENTACION", "trackName": "Moonlight"}, {"artistName": "Hozier", "trackName": "Take Me to Church"},
+                   {"artistName": "Survivor", "trackName": "Eye of the Tiger"}, {"artistName": "Lionel Richie", "trackName": "Hello"}]
+        names_from_records(results, records)
+        got = [(r["parsed"]["artist"], r["parsed"]["title"]) for r in results]
+        self.assertEqual(got[:4], [("Taylor Swift", "Shake It Off"), ("XXXTENTACION", "Moonlight"), ("Hozier", "Take Me to Church"), ("Survivor", "Eye of the Tiger")])
+        self.assertEqual(got[4], ("Adele", "Hello"))   # Lionel Richie's "Hello" isn't named in this title: unchanged
 
     def test_singer_names_are_unique_per_phone_until_idle(self):
         state = State()

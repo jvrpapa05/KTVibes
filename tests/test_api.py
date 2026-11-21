@@ -4,7 +4,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 AVAILABLE = all(importlib.util.find_spec(name) for name in ('fastapi', 'httpx', 'soundfile', 'qrcode'))
 
@@ -214,12 +214,14 @@ class APITests(unittest.TestCase):
         (folder / 'no_vocals.wav').touch()
         (folder / 'vocals.wav').touch()
         results = [{'id': 'aaaaaaaaaaa'}, {'id': 'bbbbbbbbbbb'}]
-        with patch.object(self.main.youtube, 'search', return_value=results):
+        with patch.object(self.main.youtube, 'search', return_value=results), \
+             patch.object(self.main, 'lyric_records', AsyncMock(return_value=[])):  # karaoke-server: no LRCLIB call
             found = self.client.get('/api/search', params={'q': 'joji'}).json()
         self.assertEqual([r['cached'] for r in found], [True, False])
 
     def test_search_pages(self):
-        with patch.object(self.main.youtube, 'search', return_value=[]) as search:
+        with patch.object(self.main.youtube, 'search', return_value=[]) as search, \
+             patch.object(self.main, 'lyric_records', AsyncMock(return_value=[])):  # karaoke-server: no LRCLIB call
             self.assertEqual(self.client.get('/api/search', params={'q': '晴天', 'page': 2}).status_code, 200)
             search.assert_called_once_with('晴天', 2)
             self.assertEqual(self.client.get('/api/search', params={'q': 'x', 'page': 10}).status_code, 422)
