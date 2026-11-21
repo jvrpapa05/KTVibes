@@ -247,3 +247,12 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 /* Classic theme: room time. */
 .room-add{display:flex;gap:8px}
+
+/* karaoke-server: singer name gate, asked once per phone before the remote can be used. */
+.name-gate{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:24px;background:#0b0d0cf2;backdrop-filter:blur(10px)}
+.name-card{width:min(100%,380px);display:flex;flex-direction:column;gap:14px;text-align:center}
+.name-card h2{font-size:28px}.name-card p{margin:0;color:var(--muted)}
+.name-card input{font-size:20px;padding:14px 16px;border-radius:12px;border:1px solid var(--line);background:#1b1e1d;color:var(--ink);text-align:center}
+.name-card input:focus{outline:2px solid var(--lime);outline-offset:2px}
+.name-card button{background:var(--lime);color:#1a2215;font-weight:700;border:0;padding:14px;font-size:18px}
+.row .info .singer{color:var(--lime);font-weight:700}

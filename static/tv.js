@@ -58,7 +58,7 @@ api('/api/config').then(c=>$('remote-url').textContent=$('sticker-url').textCont
 function render(next){
  state=next;if(restoring){restoring=false;restore(state);}else remember(state);if(state.guide!==guide){if(guide!==undefined)showGuideBadge(state.guide);guide=state.guide;document.body.dataset.guide=guide;}showChanges(state);showQueueChange(state);document.body.style.setProperty('--lyric-scale',state.lyric_scale??1.5);document.body.dataset.video=state.video_mode||'show';document.body.dataset.lyrics=state.lyric_mode||'two';document.body.dataset.theme=state.theme||'default';for(const b of document.querySelectorAll('[data-theme-pick]'))b.setAttribute('aria-pressed',b.dataset.themePick===document.body.dataset.theme);showClassicBar(state);showSpecs(state);showBoot();roomClock();serverSkew=state.server_time-Date.now()/1000;$('vocal').value=state.vocal;if(document.activeElement!==$('tv-music'))$('tv-music').value=state.music??1;$('tv-play').classList.toggle('paused',!state.playing);$('tv-play').setAttribute('aria-label',state.playing?'Pause':'Play');$('tv-guide').textContent=GUIDE_BADGES[state.guide]?.[0]??'Aa';$('tv-guide').hidden=(state.guides||[]).length<2;syncRanges();applyGain();
  const queued=state.upcoming.filter(i=>i.status!=='error');
- $('on-deck').replaceChildren(...queued.slice(0,3).map(i=>{const row=el('li');row.append(el('b',i.title),el('span',` ${i.artist}`),...(i.status==='ready'?[]:[el('small',` ${prepLabel(i).text}`)]));return row;}));
+ $('on-deck').replaceChildren(...queued.slice(0,3).map(i=>{const row=el('li');row.append(...(i.singer?[el('em',`${i.singer}: `,'deck-singer')]:[]),el('b',i.title),el('span',` ${i.artist}`),...(i.status==='ready'?[]:[el('small',` ${prepLabel(i).text}`)]));return row;}));
  if(queued.length>3)$('on-deck').append(el('li',`+${queued.length-3} more`,'more'));
  if(!queued.length)$('on-deck').append(el('li','Nothing queued','more'));
  // The two songs after the next one peek out from under its card between songs.
@@ -76,7 +76,7 @@ function render(next){
    video.hidden=!item.video;$('video-shade').hidden=!item.video;
    if(item.video){video.src=`/media/${item.id}/video.mp4`;video.load();}else{video.removeAttribute('src');video.load();}
    stemGain=item.gain||1;applyGain();seekTo=state.position||0;music.src=`/media/${item.id}/no_vocals`;voice.src=`/media/${item.id}/vocals`;music.load();voice.load();
-   $('song-title').textContent=item.title;$('song-artist').textContent=item.artist;$('next-title').textContent=$('card-title').textContent=item.title;$('next-art').src=thumbnail(item.id,'hqdefault');$('next-artist').textContent=$('card-artist').textContent=item.artist;$('card-number').textContent=item.number??'-----';$('card-credit').textContent=`원곡 ${item.artist}`;$('spec-length').textContent=clock(item.duration);
+   $('song-title').textContent=item.title;$('song-artist').textContent=item.artist;$('song-singer').textContent=item.singer?`🎤 ${item.singer}`:'';$('song-singer').hidden=!item.singer;$('next-singer').textContent=item.singer?`🎤 ${item.singer}`:'';$('next-singer').hidden=!item.singer;$('next-title').textContent=$('card-title').textContent=item.title;$('next-art').src=thumbnail(item.id,'hqdefault');$('next-artist').textContent=$('card-artist').textContent=item.artist;$('card-number').textContent=item.number??'-----';$('card-credit').textContent=`원곡 ${item.artist}`;$('spec-length').textContent=clock(item.duration);
    showLyrics(item);$('duration').textContent=clock(item.duration);
   }else{lyrics=[];firstLine=-1;video.pause();video.removeAttribute('src');video.load();video.hidden=true;$('video-shade').hidden=true;music.removeAttribute('src');voice.removeAttribute('src');music.load();voice.load();$('elapsed').textContent='0:00';$('duration').textContent='0:00';$('progress').parentElement.style.setProperty('--p',0);}
  }
@@ -407,11 +407,11 @@ function showChanges(s){
 // Queue changes from any remote get the same card: what was added, removed, moved, or became ready.
 let lastQueue=null;
 function showQueueChange(s){
- const queue=s.upcoming.map(i=>({key:i.key,title:i.title,status:i.status})),before=lastQueue;lastQueue=queue;
+ const queue=s.upcoming.map(i=>({key:i.key,title:i.title,singer:i.singer,status:i.status})),before=lastQueue;lastQueue=queue;
  if(!before)return;
  const old=new Map(before.map(i=>[i.key,i])),keys=new Set(queue.map(i=>i.key)),stage=s.current?.key;
  const added=queue.find(i=>!old.has(i.key)),removed=before.find(i=>!keys.has(i.key)&&i.key!==stage);
- if(added)return showBadge('+','Queued',added.title);
+ if(added)return showBadge('+',added.singer?`Queued by ${added.singer}`:'Queued',added.title);
  if(removed)return showBadge('✕','Removed',removed.title);
  const failed=queue.find(i=>i.status==='error'&&old.get(i.key).status!=='error');
  if(failed)return showBadge('!','Couldn’t prepare',failed.title);

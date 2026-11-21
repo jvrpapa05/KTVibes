@@ -151,6 +151,33 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         b = await state.add('abcdefghijk', 'A', 'Encore')
         self.assertNotEqual(a['key'], b['key'])
 
+    async def test_singer_rides_with_the_song_and_survives_restart(self):
+        # karaoke-server: each queued song carries who sings it, through promote, undo and a restart.
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'queue.json'
+            state = State()
+            state.restore(path, seed=lambda: {})
+            a = await state.add('abcdefghijk', 'Queen', 'Bohemian Rhapsody', 'Anna')
+            await state.add('12345678901', 'ABBA', 'Dancing Queen', 'Ben')
+            await state.add('zyxwvutsrqp', 'Toto', 'Africa')  # an old client sends no singer
+            self.assertEqual([i['singer'] for i in state.snapshot()['upcoming']], ['Anna', 'Ben', ''])
+            a['status'] = 'ready'
+            state.promote()
+            self.assertEqual(state.current['singer'], 'Anna')
+            await state.broadcast()
+            again = State()
+            again.restore(path, seed=lambda: {})
+            self.assertEqual([(i['title'], i['singer']) for i in again.upcoming],
+                             [('Bohemian Rhapsody', 'Anna'), ('Dancing Queen', 'Ben'), ('Africa', '')])
+
+    def test_singer_name_is_tidied_and_capped(self):
+        from pydantic import ValidationError
+        from ktvibes.main import Song
+        self.assertEqual(Song(id='abcdefghijk', artist='Queen', title='Song', singer='  Anna   Marie ').singer, 'Anna Marie')
+        self.assertEqual(Song(id='abcdefghijk', artist='Queen', title='Song').singer, '')
+        with self.assertRaises(ValidationError):
+            Song(id='abcdefghijk', artist='Queen', title='Song', singer='x' * 41)
+
     async def test_queue_and_history_survive_restart(self):
         import tempfile
         from pathlib import Path

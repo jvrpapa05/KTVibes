@@ -26,7 +26,7 @@ function render(next){
 // Now playing: a card at the top, handing over to the dock once scrolled away.
 function showNow(first){
  const c=state.current,art=c?thumbnail(c.id):'';
- showHero(!!c,first);$('hero').classList.toggle('paused',!state.playing);$('hero-state').textContent=state.playing?'NOW SINGING':'PAUSED';
+ showHero(!!c,first);$('hero').classList.toggle('paused',!state.playing);$('hero-state').textContent=(state.playing?'NOW SINGING':'PAUSED')+(c?.singer?` · ${c.singer.toUpperCase()}`:'');
  for(const id of ['hero-play','dock-play']){$(id).classList.toggle('playing',!!(c&&state.playing));$(id).setAttribute('aria-label',state.playing?'Pause':'Play');$(id).disabled=!c;}
  // The card keeps its last song while it folds away.
  for(const id of c?['hero-art','hero-glow','dock-art','sheet-art']:['dock-art','sheet-art'])showImage($(id),art);
@@ -180,7 +180,7 @@ const statusKo=(item,index)=>index===0&&item.status==='ready'?'다음곡':STATUS
 function showQueue(before){
  const count=state.upcoming.length;$('queue-count').textContent=$('dock-count').textContent=count;
  if(before&&count>before.upcoming.length&&!REDUCED.matches)for(const id of ['queue-count','dock-count']){const c=$(id);c.classList.remove('bump');void c.offsetWidth;c.classList.add('bump');}
- const shape=JSON.stringify([!!state.current,...state.upcoming.map(i=>[i.key,i.title,i.artist,i.status,i.error])]);  // the empty notice reads differently while a song plays
+ const shape=JSON.stringify([!!state.current,...state.upcoming.map(i=>[i.key,i.title,i.artist,i.singer,i.status,i.error])]);  // the empty notice reads differently while a song plays
  if(shape!==queueShape&&!dragging){
   // A song that turns ready while queued flashes its ring once.
   const preparing=new Set(before?.upcoming.filter(i=>i.status!=='ready').map(i=>i.key));
@@ -218,7 +218,7 @@ function queueRow(item,index,justReady){
  // The ring shows while the song prepares, and once more as it turns ready.
  if(item.status!=='ready'&&item.status!=='error'||justReady&&item.status==='ready')thumb.insertAdjacentHTML('beforeend',`<svg class="ring" viewBox="0 0 52 52" style="--c:${RING}" aria-hidden="true"><circle class="track" cx="26" cy="26" r="23"/><circle class="fill" cx="26" cy="26" r="23"/></svg>`);
  if(justReady&&item.status==='ready')haptic(10);
- const info=el('div',undefined,'info'),line=el('p');if(item.number)line.append(el('span',String(item.number),'qnum classic-only'),' ');line.append(item.artist,...(justReady&&item.status==='ready'?[el('em','준비 완료','ready-lamp classic-only')]:[]),el('span',' · ','sep'),el('span',statusKo(item,index),'status-ko classic-only'),el('span',statusText(item),'status'));info.append(el('h3',item.title),line);
+ const info=el('div',undefined,'info'),line=el('p');if(item.singer)line.append(el('span',`🎤 ${item.singer}`,'singer'),el('span',' · ','sep'));if(item.number)line.append(el('span',String(item.number),'qnum classic-only'),' ');line.append(item.artist,...(justReady&&item.status==='ready'?[el('em','준비 완료','ready-lamp classic-only')]:[]),el('span',' · ','sep'),el('span',statusKo(item,index),'status-ko classic-only'),el('span',statusText(item),'status'));info.append(el('h3',item.title),line);
  if(item.status!=='ready'&&item.status!=='error'){const bar=el('div',undefined,'prepbar classic-only');bar.append(el('i'));info.append(bar);}
  if(item.error){const retry=el('button','Retry','retry');retry.onclick=()=>send({action:'retry',key:item.key});info.append(el('p',item.error,'error'),retry);}
  const remove=el('button','×','row-button');remove.setAttribute('aria-label',`Remove ${item.title}`);
@@ -293,7 +293,7 @@ async function loadRecent(){
 }
 // Search in pages of 10; "More results" appends the next page.
 let search={query:'',page:0,seen:new Set()},searchRun=0;
-const enqueue=song=>api('/api/queue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:song.id,artist:song.artist,title:song.title})});
+const enqueue=song=>api('/api/queue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:song.id,artist:song.artist,title:song.title,singer:singer()})});
 // Result button states: add, added, failed.
 const ICONS={add:'<path d="M12 5v14M5 12h14"/>',added:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',failed:'<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/>'};
 function icon(node,name){node.className=`result-icon ${name}`;node.innerHTML=`<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;}
@@ -471,3 +471,12 @@ $('more').onclick=()=>{search.page++;loadPage();};
 // Keep the page's end clear of the dock, whatever its height.
 new ResizeObserver(()=>document.body.style.setProperty('--dock',`${$('dock').offsetHeight}px`)).observe($('dock'));
 classicUi=classicRemote({send,toast,haptic,swipeable});if(state)classicUi.render(state);
+
+// karaoke-server: ask for the singer's name once per phone; every song queued from here carries it.
+const SINGER='karaoke.singer';let singerName='';  // kept in memory too, for private tabs where storage fails
+function singer(){try{return localStorage.getItem(SINGER)||singerName;}catch{return singerName;}}
+function showSinger(){$('singer-name').textContent=singer()||'—';}
+function askName(){$('name-input').value=singer();$('name-gate').hidden=false;setTimeout(()=>$('name-input').focus(),50);}
+$('name-form').onsubmit=e=>{e.preventDefault();const name=$('name-input').value.split(/\s+/).filter(Boolean).join(' ').slice(0,40);if(!name)return;singerName=name;try{localStorage.setItem(SINGER,name);}catch{}$('name-gate').hidden=true;showSinger();toast(`Singing as ${name}`);};
+$('singer-change').onclick=askName;
+showSinger();if(!singer())askName();

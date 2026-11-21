@@ -97,7 +97,7 @@ class State:
         if saved.get("current"):
             entries = [saved["current"], *entries]
         for entry in entries:
-            item = self.entry(entry["id"], entry["artist"], entry["title"])
+            item = self.entry(entry["id"], entry["artist"], entry["title"], entry.get("singer", ""))
             if entry is saved.get("current"):
                 item["resume"] = float(entry.get("position") or 0)
             self.upcoming.append(item)
@@ -106,7 +106,7 @@ class State:
     def save(self):
         if self.path is None:
             return
-        brief = lambda i: {"id": i["id"], "artist": i["artist"], "title": i["title"]}
+        brief = lambda i: {"id": i["id"], "artist": i["artist"], "title": i["title"], "singer": i.get("singer", "")}
         data = {"current": self.current and {**brief(self.current), "position": self.position},
                 "upcoming": [brief(i) for i in self.upcoming if i["status"] != "error"], "played": self.played,
                 "theme": self.theme, "room_ends": self.room_ends}
@@ -180,8 +180,8 @@ class State:
                     self.guide = "jyutping" if cantonese(candidate.get("lyrics") or []) and "jyutping" in self.guides() else "latin"
 
     @staticmethod
-    def entry(video_id, artist, title):
-        return {"key": uuid.uuid4().hex, "id": video_id, "artist": artist, "title": title,
+    def entry(video_id, artist, title, singer=""):
+        return {"key": uuid.uuid4().hex, "id": video_id, "artist": artist, "title": title, "singer": singer,
                 "status": "queued", "lyrics": [], "duration": 0, "error": None}
 
     def remember_offset(self):
@@ -211,10 +211,10 @@ class State:
     def queued(self, video_id):
         return any(i and i["id"] == video_id and i["status"] != "error" for i in (self.current, *self.upcoming))
 
-    async def add(self, video_id, artist, title):
+    async def add(self, video_id, artist, title, singer=""):
         if self.queued(video_id):
             raise ValueError("That song is already in the queue")
-        item = self.entry(video_id, artist, title)
+        item = self.entry(video_id, artist, title, singer)
         self.upcoming.append(item)
         self.wake.set()
         await self.broadcast()

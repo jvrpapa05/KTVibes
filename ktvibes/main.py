@@ -92,6 +92,12 @@ class Song(BaseModel):
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")
     artist: str = Field(min_length=1, max_length=200)
     title: str = Field(min_length=1, max_length=300)
+    singer: str = Field(default="", max_length=40)  # karaoke-server: who sings it, typed once on the remote
+
+    @field_validator("singer")
+    @classmethod
+    def tidy_singer(cls, value):
+        return " ".join(value.split())
 
     @field_validator("artist", "title")
     @classmethod
@@ -214,7 +220,7 @@ async def enqueue(song: Song):
     if len(state.upcoming) >= 100:
         raise HTTPException(409, "Queue is full")
     try:
-        return await state.add(song.id, song.artist, song.title)
+        return await state.add(song.id, song.artist, song.title, song.singer)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
