@@ -363,6 +363,14 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         with self.assertRaises(ValueError):
             await state.control({'action': 'react', 'value': 'spam text'})
 
+    def test_state_counts_connected_phones_not_the_tv(self):
+        # karaoke-server: the TV shows how many phones have the remote open.
+        state = State()
+        state.clients = {'tv-socket': 'tv', 'a': 'remote', 'b': 'remote'}
+        self.assertEqual(state.snapshot()['phones'], 2)
+        del state.clients['a']
+        self.assertEqual(state.snapshot()['phones'], 1)
+
     def test_singer_names_are_unique_per_phone_until_idle(self):
         state = State()
         self.assertEqual(state.claim_singer('  Anna ', 'phone-1'), 'Anna')
