@@ -256,3 +256,12 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
 .name-card input:focus{outline:2px solid var(--lime);outline-offset:2px}
 .name-card button{background:var(--lime);color:#1a2215;font-weight:700;border:0;padding:14px;font-size:18px}
 .row .info .singer{color:var(--lime);font-weight:700}
+
+/* karaoke-server: settings lock. Locked sections can't be touched or focused (inert) and are dimmed. */
+.lockbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:6px 0 14px;padding:12px 14px;border-radius:14px;border:1px solid var(--line);background:#1b1e1d;font-size:14px}
+.lockbar .lock-actions{display:flex;gap:8px;flex:0 0 auto}
+.lockbar.locked #lock-go,.lockbar.confirming #lock-go{background:var(--lime);color:#1a2215;border:0;font-weight:700}
+.lockbar.unlocked{border-color:var(--lime)}
+/* .sg and .mixline are display:contents outside Classic (classic-remote.css), so opacity on them renders nothing:
+   dim their first real boxes instead. */
+.sheet .sg[inert]>:not(.mixline),.sheet .sg[inert]>.mixline>*{opacity:.38;filter:saturate(.4);transition:opacity .2s}

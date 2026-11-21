@@ -480,3 +480,25 @@ function askName(){$('name-input').value=singer();$('name-gate').hidden=false;se
 $('name-form').onsubmit=e=>{e.preventDefault();const name=$('name-input').value.split(/\s+/).filter(Boolean).join(' ').slice(0,40);if(!name)return;singerName=name;try{localStorage.setItem(SINGER,name);}catch{}$('name-gate').hidden=true;showSinger();toast(`Singing as ${name}`);};
 $('singer-change').onclick=askName;
 showSinger();if(!singer())askName();
+
+// karaoke-server: settings lock. Room settings (everything in the sheet but Singer) start locked so a pocket tap
+// can't change them. Unlock asks to confirm, lasts 2 minutes, and locks again early when the phone sleeps.
+const UNLOCK_MS=120000;let unlockedUntil=0,lockTimer=null,confirming=false;
+const lockedSections=()=>[...$('sheet').querySelectorAll('.sg')].filter(sg=>sg.id!=='sg-singer');
+function renderLock(){
+ const open=Date.now()<unlockedUntil;
+ for(const sg of lockedSections())sg.inert=!open;
+ const bar=$('lockbar');bar.className=`lockbar ${open?'unlocked':confirming?'confirming':'locked'}`;
+ $('lock-cancel').hidden=!confirming||open;
+ if(open){const left=Math.ceil((unlockedUntil-Date.now())/1000);$('lock-text').textContent=`🔓 Unlocked · locks in ${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}`;$('lock-go').textContent='Lock now';}
+ else if(confirming){$('lock-text').textContent='Unlock settings for 2 minutes?';$('lock-go').textContent='Unlock';}
+ else{$('lock-text').textContent='🔒 Settings are locked';$('lock-go').textContent='Unlock';}
+}
+function lockSettings(){unlockedUntil=0;confirming=false;clearInterval(lockTimer);lockTimer=null;renderLock();}
+function unlockSettings(){unlockedUntil=Date.now()+UNLOCK_MS;confirming=false;clearInterval(lockTimer);
+ lockTimer=setInterval(()=>{if(Date.now()>=unlockedUntil){lockSettings();toast('Settings locked');}else renderLock();},1000);
+ renderLock();requestAnimationFrame(()=>SEGMENTED.forEach(placePill));haptic(8);}
+$('lock-go').onclick=()=>{if(Date.now()<unlockedUntil)return lockSettings();if(confirming)return unlockSettings();confirming=true;renderLock();};
+$('lock-cancel').onclick=()=>{confirming=false;renderLock();};
+document.addEventListener('visibilitychange',()=>{if(document.hidden)lockSettings();});
+lockSettings();
