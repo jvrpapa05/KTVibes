@@ -93,6 +93,7 @@ class Song(BaseModel):
     artist: str = Field(min_length=1, max_length=200)
     title: str = Field(min_length=1, max_length=300)
     singer: str = Field(default="", max_length=40)  # karaoke-server: who sings it, typed once on the remote
+    device: str = Field(default="", max_length=64)  # karaoke-server: the remote's random id; names are unique per phone
 
     @field_validator("singer")
     @classmethod
@@ -220,9 +221,24 @@ async def enqueue(song: Song):
     if len(state.upcoming) >= 100:
         raise HTTPException(409, "Queue is full")
     try:
-        return await state.add(song.id, song.artist, song.title, song.singer)
+        singer = state.claim_singer(song.singer, song.device) if song.singer else ""
+        return await state.add(song.id, song.artist, song.title, singer)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+
+class Singer(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    device: str = Field(min_length=8, max_length=64)
+
+@app.post("/api/singer")
+async def claim_singer(singer: Singer):
+    """karaoke-server: take (or keep) a singer name for this phone; 409 if another phone is using it."""
+    try:
+        name = state.claim_singer(singer.name, singer.device)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    state.save()
+    return {"name": name}
 
 @app.get("/media/{video_id}/{filename}")
 async def media(video_id: str, filename: str):

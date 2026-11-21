@@ -15,6 +15,10 @@ def following(options, current):
 
 GUIDES = ("off", "latin", "jyutping", "hangul")
 REACTIONS = ("👏", "🔥", "🎉", "💚")  # cheers a remote can float up on the TV
+SINGER_IDLE = 6 * 3600  # karaoke-server: a singer name is freed after 6 idle hours
+# karaoke-server: every room setting a singer can set is part of their profile. Not the song position, and not the
+# lyric timing nudge (offset): that corrects the song itself and is kept per song in meta.json.
+PROFILE = ("vocal", "music", "key", "speed", "lyric_scale", "video_mode", "lyric_mode")
 HISTORY = 200  # remembered plays, for the remote's "Recent" list
 UNDO_SECONDS = 15  # how long a removal can be taken back
 SAVE_EVERY = 10  # seconds between queue.json writes for position reports alone
@@ -58,6 +62,8 @@ class State:
         self.played = {}  # video id -> unix time the song last went on stage
         self.audio = False  # the TV has enabled sound, so playback can actually start
         self.undo = None  # the last removal, for the remote's Undo toast
+        self.singers = {}  # karaoke-server: name key -> {"name", "device", "seen"}; one phone per name at a time
+        self.profiles = {}  # karaoke-server: name key -> {setting: value for PROFILE}, applied on that singer's songs
         self.saved_at = 0.0
         self.build = ""  # fingerprint of the web app files; open pages reload when it changes
         self.lyrics_sent = {}  # TV socket -> key of the song whose lyrics it already has
@@ -92,6 +98,8 @@ class State:
         # Before play history existed, fall back to whatever seed() knows (e.g. cache timestamps).
         self.played = saved["played"] if isinstance(saved.get("played"), dict) else seed()
         self.theme = saved.get("theme") if saved.get("theme") in DISPLAY["theme"] else "default"
+        self.singers = saved["singers"] if isinstance(saved.get("singers"), dict) else {}
+        self.profiles = saved["profiles"] if isinstance(saved.get("profiles"), dict) else {}
         self.room_ends = float(saved["room_ends"]) if self.theme == "classic" and isinstance(saved.get("room_ends"), (int, float)) else None
         entries = saved.get("upcoming", [])
         if saved.get("current"):
@@ -109,7 +117,7 @@ class State:
         brief = lambda i: {"id": i["id"], "artist": i["artist"], "title": i["title"], "singer": i.get("singer", "")}
         data = {"current": self.current and {**brief(self.current), "position": self.position},
                 "upcoming": [brief(i) for i in self.upcoming if i["status"] != "error"], "played": self.played,
-                "theme": self.theme, "room_ends": self.room_ends}
+                "theme": self.theme, "room_ends": self.room_ends, "singers": self.singers, "profiles": self.profiles}
         temporary = self.path.with_suffix(".tmp")
         temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         temporary.replace(self.path)
@@ -155,6 +163,7 @@ class State:
         self.position = 0
         self.offset = 0
         # Tempo and key suit one singer and one song, so each song starts as recorded.
+        # (karaoke-server: promote() then applies the next singer's saved profile, if any.)
         self.speed = 1.0
         self.key = 0
         # A short breather between songs shows who's up next; a song on an empty stage starts at once.
@@ -174,6 +183,7 @@ class State:
                 if len(self.played) > HISTORY:
                     self.played = dict(sorted(self.played.items(), key=lambda p: p[1])[-HISTORY:])
                 self.offset = candidate.get("offset", 0)
+                self.apply_profile()
                 # Cantopop reads in jyutping, Mandarin in pinyin: follow the song when on either.
                 if self.guide in ("latin", "jyutping"):
                     from .lyrics import cantonese
@@ -183,6 +193,20 @@ class State:
     def entry(video_id, artist, title, singer=""):
         return {"key": uuid.uuid4().hex, "id": video_id, "artist": artist, "title": title, "singer": singer,
                 "status": "queued", "lyrics": [], "duration": 0, "error": None}
+
+    def apply_profile(self):
+        """karaoke-server: put the current singer's saved settings on stage (e.g. Anna 20% vocals, Bea 50%)."""
+        singer = (self.current or {}).get("singer")
+        profile = self.profiles.get(singer.casefold()) if singer else None
+        for name in PROFILE if profile else ():
+            if name in profile:
+                setattr(self, name, profile[name])
+
+    def remember_profile(self):
+        """karaoke-server: a change made during someone's song becomes that singer's profile."""
+        singer = (self.current or {}).get("singer")
+        if singer:
+            self.profiles[singer.casefold()] = {name: getattr(self, name) for name in PROFILE}
 
     def remember_offset(self):
         """Keep the lyric timing nudge in the song's meta.json, so it applies next time too."""
@@ -210,6 +234,25 @@ class State:
 
     def queued(self, video_id):
         return any(i and i["id"] == video_id and i["status"] != "error" for i in (self.current, *self.upcoming))
+
+    def claim_singer(self, name, device):
+        """karaoke-server: names are unique. A name belongs to one phone (device id) until it has been idle for
+        SINGER_IDLE seconds; then anyone, including the same person on a new phone, can take it. Returns the tidy name."""
+        name = " ".join(str(name).split())[:40]
+        if not name:
+            raise ValueError("Enter your name")
+        if not device:
+            raise ValueError("This remote needs a reload")
+        now = time.time()
+        self.singers = {k: v for k, v in self.singers.items() if now - v.get("seen", 0) < SINGER_IDLE}
+        key = name.casefold()
+        holder = self.singers.get(key)
+        if holder and holder["device"] != device:
+            raise ValueError(f"“{holder['name']}” is already singing here. Add an initial or a nickname.")
+        # One name per phone: switching names frees the old one.
+        self.singers = {k: v for k, v in self.singers.items() if v["device"] != device or k == key}
+        self.singers[key] = {"name": name, "device": device, "seen": now}
+        return name
 
     async def add(self, video_id, artist, title, singer=""):
         if self.queued(video_id):
@@ -279,6 +322,7 @@ class State:
             self.seek_id += 1
         elif action == "lyric_scale":
             self.lyric_scale = max(0.6, min(2.5, number(message["value"])))
+            self.remember_profile()
         elif action in DISPLAY:
             options = DISPLAY[action]
             value = message.get("value")
@@ -289,6 +333,8 @@ class State:
             if action == "lyric_mode" and self.theme == "classic":
                 value = "two"  # Classic always shows two lines (a TV restoring its own setting must not fail)
             setattr(self, action, value)
+            if action in PROFILE:
+                self.remember_profile()
             if action == "theme":
                 if value == "classic":
                     self.lyric_mode = "two"
@@ -303,8 +349,10 @@ class State:
             self.room_ends = max(time.time(), self.room_ends or 0) + minutes * 60
         elif action == "speed":
             self.speed = round(max(0.5, min(1.5, number(message["value"]))), 2)
+            self.remember_profile()
         elif action == "key":
             self.key = int(max(-6, min(6, round(number(message["value"])))))
+            self.remember_profile()
         elif action == "guide":
             return  # karaoke-server: guides are always off; ignore (TVs may still restore an old saved guide)
             modes = self.guides()
@@ -317,8 +365,10 @@ class State:
                 raise ValueError("Unknown guide")
         elif action == "music":
             self.music = max(0, min(1, number(message["value"])))
+            self.remember_profile()
         elif action == "vocal":
             self.vocal = max(0, min(1, number(message["value"])))
+            self.remember_profile()
         elif action == "remove":
             index = next((n for n, i in enumerate(self.upcoming) if i["key"] == message.get("key")), None)
             if index is not None:

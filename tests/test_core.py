@@ -178,6 +178,67 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValidationError):
             Song(id='abcdefghijk', artist='Queen', title='Song', singer='x' * 41)
 
+    async def test_each_singer_gets_their_own_mix_key_and_speed(self):
+        # karaoke-server: Anna likes 20% vocals, Bea 50%; each song plays with its singer's settings.
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'queue.json'
+            state = State(); state.restore(path, seed=lambda: {})
+            async def sing(video_id, singer):
+                item = await state.add(video_id, 'Artist', 'Song ' + video_id[:2], singer)
+                item['status'] = 'ready'
+                if state.current:
+                    state.advance()
+                else:
+                    state.promote()
+                self.assertEqual(state.current['singer'], singer)
+            await sing('aaaaaaaaaaa', 'Anna')
+            await state.control({'action': 'vocal', 'value': 0.2})
+            await state.control({'action': 'key', 'value': -2})
+            await sing('bbbbbbbbbbb', 'Bea')
+            self.assertEqual((state.key, state.speed), (0, 1.0))  # a first-timer starts as recorded
+            await state.control({'action': 'vocal', 'value': 0.5})
+            await state.control({'action': 'speed', 'value': 0.9})
+            await sing('ccccccccccc', 'anna')  # same singer, any case
+            self.assertEqual((state.vocal, state.key, state.speed), (0.2, -2, 1.0))
+            await sing('ddddddddddd', 'Bea')
+            self.assertEqual((state.vocal, state.key, state.speed), (0.5, 0, 0.9))
+            await sing('eeeeeeeeeee', '')  # no name: room settings, nothing saved
+            await state.control({'action': 'vocal', 'value': 0.9})
+            self.assertEqual(state.profiles['bea']['vocal'], 0.5)
+            await state.broadcast()
+            again = State(); again.restore(path, seed=lambda: {})
+            self.assertEqual({k: again.profiles['anna'][k] for k in ('vocal', 'key', 'speed')}, {'vocal': 0.2, 'key': -2, 'speed': 1.0})
+
+    async def test_singer_profile_covers_display_settings_too(self):
+        state = State()
+        for video_id, singer in (('aaaaaaaaaaa', 'Anna'), ('bbbbbbbbbbb', 'Bea')):
+            (await state.add(video_id, 'A', 'S', singer))['status'] = 'ready'
+        state.promote()
+        await state.control({'action': 'lyric_scale', 'value': 2.0})
+        await state.control({'action': 'video_mode', 'value': 'blur'})
+        await state.control({'action': 'lyric_mode', 'value': 'scroll'})
+        await state.control({'action': 'music', 'value': 0.6})
+        state.advance()                                   # Bea: first time, keeps the room as it is
+        await state.control({'action': 'video_mode', 'value': 'show'})
+        await state.control({'action': 'lyric_scale', 'value': 1.0})
+        (await state.add('ccccccccccc', 'A', 'S', 'Anna'))['status'] = 'ready'
+        state.advance()                                   # Anna again: all her settings come back
+        self.assertEqual((state.lyric_scale, state.video_mode, state.lyric_mode, state.music), (2.0, 'blur', 'scroll', 0.6))
+        self.assertEqual(state.profiles['bea']['video_mode'], 'show')
+
+    def test_singer_names_are_unique_per_phone_until_idle(self):
+        state = State()
+        self.assertEqual(state.claim_singer('  Anna ', 'phone-1'), 'Anna')
+        self.assertEqual(state.claim_singer('anna', 'phone-1'), 'anna')  # same phone may keep or restyle it
+        with self.assertRaisesRegex(ValueError, 'already singing here'):
+            state.claim_singer('ANNA', 'phone-2')
+        state.claim_singer('Bea', 'phone-1')  # switching names frees the old one
+        self.assertEqual(state.claim_singer('Anna', 'phone-2'), 'Anna')
+        state.singers['anna']['seen'] -= 6 * 3600 + 1  # idle for 6 hours: free again
+        self.assertEqual(state.claim_singer('Anna', 'phone-3'), 'Anna')
+        with self.assertRaises(ValueError):
+            state.claim_singer('   ', 'phone-3')
+
     async def test_queue_and_history_survive_restart(self):
         import tempfile
         from pathlib import Path

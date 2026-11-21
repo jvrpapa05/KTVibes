@@ -265,3 +265,4 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
 /* .sg and .mixline are display:contents outside Classic (classic-remote.css), so opacity on them renders nothing:
    dim their first real boxes instead. */
 .sheet .sg[inert]>:not(.mixline),.sheet .sg[inert]>.mixline>*{opacity:.38;filter:saturate(.4);transition:opacity .2s}
+.name-error{margin:0;color:#ffaaa2;font-size:15px}

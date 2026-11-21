@@ -4,7 +4,8 @@ video.muted=true;
 let breather=0,guide,state,lyrics=[],firstLine=-1,stemGain=1,currentKey=null,context,musicGain,voiceGain,shifter,enabled=false,activeLine=-1,starting=false,generation=0,lastReport=0,seekTo=null,serverSkew=0,buffering=false,videoStarting=false,lyricsPositioned=false,lastSeek=0,shownPair='',fitKey='';
 const error=text=>$('tv-error').textContent=text;
 // This screen remembers its own display settings and restores them each time it (re)connects.
-const SETTINGS='ktvibes.tv-settings',SETTING_KEYS=['lyric_scale','vocal','guide','video_mode','lyric_mode'];let restoring=false;
+// karaoke-server: the TV no longer restores vocals (they belong to singer profiles, and a TV reload must not overwrite one) or guides (off).
+const SETTINGS='ktvibes.tv-settings',SETTING_KEYS=['lyric_scale','video_mode','lyric_mode'];let restoring=false;
 // On (re)connect, also tell the server whether sound is on, so remotes know if playback can start.
 // Many music videos have black bars baked into the frame; sample a few frames, find the bars,
 // then zoom past them so the picture itself fills the screen. The smallest bars seen win, so a dark scene can't over-crop.

@@ -293,7 +293,7 @@ async function loadRecent(){
 }
 // Search in pages of 10; "More results" appends the next page.
 let search={query:'',page:0,seen:new Set()},searchRun=0;
-const enqueue=song=>api('/api/queue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:song.id,artist:song.artist,title:song.title,singer:singer()})});
+const enqueue=song=>api('/api/queue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:song.id,artist:song.artist,title:song.title,singer:singer(),device:deviceId()})});
 // Result button states: add, added, failed.
 const ICONS={add:'<path d="M12 5v14M5 12h14"/>',added:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',failed:'<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/>'};
 function icon(node,name){node.className=`result-icon ${name}`;node.innerHTML=`<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;}
@@ -476,10 +476,23 @@ classicUi=classicRemote({send,toast,haptic,swipeable});if(state)classicUi.render
 const SINGER='karaoke.singer';let singerName='';  // kept in memory too, for private tabs where storage fails
 function singer(){try{return localStorage.getItem(SINGER)||singerName;}catch{return singerName;}}
 function showSinger(){$('singer-name').textContent=singer()||'—';}
-function askName(){$('name-input').value=singer();$('name-gate').hidden=false;setTimeout(()=>$('name-input').focus(),50);}
-$('name-form').onsubmit=e=>{e.preventDefault();const name=$('name-input').value.split(/\s+/).filter(Boolean).join(' ').slice(0,40);if(!name)return;singerName=name;try{localStorage.setItem(SINGER,name);}catch{}$('name-gate').hidden=true;showSinger();toast(`Singing as ${name}`);};
-$('singer-change').onclick=askName;
-showSinger();if(!singer())askName();
+// Names are unique: the server lends a name to one phone (a random id kept here) until it's idle for 6 hours.
+const DEVICE='karaoke.device';let deviceMemo='';
+function deviceId(){try{let id=localStorage.getItem(DEVICE);if(!id){id=crypto.randomUUID?.()||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;localStorage.setItem(DEVICE,id);}return id;}catch{return deviceMemo||=`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;}}
+function setSinger(name){singerName=name;try{if(name)localStorage.setItem(SINGER,name);else localStorage.removeItem(SINGER);}catch{}showSinger();}
+async function claim(name){return api('/api/singer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,device:deviceId()})});}
+function askName(message=''){$('name-input').value=singer();$('name-error').textContent=message;$('name-error').hidden=!message;$('name-gate').hidden=false;setTimeout(()=>$('name-input').focus(),50);}
+$('name-form').onsubmit=async e=>{e.preventDefault();const name=$('name-input').value.split(/\s+/).filter(Boolean).join(' ').slice(0,40);if(!name)return;
+ $('name-save').disabled=true;
+ try{const r=await claim(name);setSinger(r.name);$('name-gate').hidden=true;toast(`Singing as ${r.name}`);}
+ catch(error){$('name-error').textContent=error.message;$('name-error').hidden=false;}
+ finally{$('name-save').disabled=false;}};
+$('singer-change').onclick=()=>askName();
+// Keep the name while the remote is open; if someone else took it meanwhile, ask again.
+async function keepName(){const name=singer();if(!name)return askName();try{const r=await claim(name);setSinger(r.name);}catch(error){if(/already/.test(error.message)){setSinger('');askName(error.message);}}}
+setInterval(()=>{if(!document.hidden)keepName();},15*60*1000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)keepName();});
+showSinger();keepName();
 
 // karaoke-server: settings lock. Room settings (everything in the sheet but Singer) start locked so a pocket tap
 // can't change them. Unlock asks to confirm, lasts 2 minutes, and locks again early when the phone sleeps.
