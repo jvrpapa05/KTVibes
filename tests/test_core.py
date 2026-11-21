@@ -548,6 +548,34 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         mark_lyrics(results, [])  # LRCLIB down: the order is as before
         self.assertEqual([x["id"] for x in order_results(results)][:2], ["edit", "story"])
 
+    def test_tv_and_award_show_performances_are_live(self):
+        # karaoke-server: 5,000-song study (2026-11-22): these were labelled official, so their lyrics counted as matching
+        from ktvibes.youtube import kind
+        for title, channel in (("Eminem & Rihanna Perform “Love the Way You Lie / Not Afraid” at 2010 VMAs | MTV", "MTV"),
+                               ("Justin Bieber Performs 'Love Yourself' on the ELLEN SHOW", "TheEllenShow"),
+                               ('Billie Eilish - What Was I Made For? (From The Motion Picture "Barbie") [2024 GRAMMY Performance]', "BillieEilishVEVO"),
+                               ("Jimin: Who | The Tonight Show Starring Jimmy Fallon", "The Tonight Show Starring Jimmy Fallon"),
+                               ("Teddy Swims – “Bad Dreams” [2024 Billboard Music Awards]", "Teddy Swims")):
+            self.assertEqual(kind(title, channel, channel), "live", title)
+        for title, channel in (("정국 (Jung Kook) 'Seven (feat. Latto)' Official Performance Video", "HYBE LABELS"),
+                               ("Ben&Ben - Leaves (Official Music Video)", "Ben&Ben"), ("The Weeknd - Save Your Tears (Official Music Video)", "TheWeekndVEVO")):
+            self.assertEqual(kind(title, channel), "official", title)
+
+    def test_accents_do_not_stop_a_match(self):
+        # karaoke-server: 5,000-song study (2026-11-22): "GIVĒON - Heartbreak Anniversary (Official Music Video)" vs
+        # LRCLIB's "Giveon", and "MÍA" vs "MIA": the official video was passed over
+        from ktvibes.youtube import mark_lyrics, artist_keys, song_name, names_from_records
+        results = [{"id": "mv", "kind": "official", "title": "GIVĒON - Heartbreak Anniversary (Official Music Video)", "channel": "GIVĒON",
+                    "duration": 248, "parsed": {"artist": "GIVĒON", "title": "Heartbreak Anniversary"}},
+                   {"id": "mia", "kind": "official", "title": "BAD BUNNY x DRAKE - MÍA (Official Video)", "channel": "Bad Bunny",
+                    "duration": 237, "parsed": {"artist": "BAD BUNNY x DRAKE", "title": "MÍA"}}]
+        mark_lyrics(results, [(song_name("Heartbreak Anniversary"), 247.0, artist_keys("Giveon")), (song_name("MIA"), 236.0, artist_keys("Bad Bunny"))])
+        self.assertTrue(all(r["lyrics_match"] for r in results))
+        # one vote for both spellings, written the way the video writes it
+        names_from_records(results, [{"artistName": "Bad Bunny", "trackName": "MIA"}, {"artistName": "Bad Bunny", "trackName": "MIA"},
+                                     {"artistName": "Bad Bunny", "trackName": "MÍA"}])
+        self.assertEqual(results[1]["parsed"]["title"], "MÍA")
+
     def test_real_length_of_lyrics_comes_from_their_timing_not_the_label(self):
         # karaoke-server: real LRCLIB records for Lady Gaga "Telephone" (2026-11-21), cut down to first/last lines
         from ktvibes.lyrics import real_lengths, fits

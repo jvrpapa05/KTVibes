@@ -7,6 +7,7 @@ import subprocess
 import time
 import urllib.parse
 import urllib.request
+import unicodedata
 from pathlib import Path
 
 ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
@@ -58,7 +59,15 @@ COVER = re.compile(r"[(\[][^)\]]*\bcover\b[^)\]]*[)\]]|\bcover(?:ed)? by\b|(?<!t
                    r"|[\"“]cover[\"”]|#cover\b", re.I)
 LYRIC = re.compile(r"\blyrics?\b|lyric video|\(lyric\)|sing-?along|가사|歌詞|歌词", re.I)
 AUDIO = re.compile(r"official audio|\baudio\b|visuali[sz]er", re.I)
-LIVE = re.compile(r"\blive\b|live at|live session|\bconcert\b|\bunplugged\b", re.I)
+LIVE = re.compile(r"\blive\b|live at|live session|\bconcert\b|\bunplugged\b"
+                  # karaoke-server: TV and award-show performances (5,000-song study, 2026-11-22: "MTV - Eminem & Rihanna
+                  # Perform ... at 2010 VMAs" and "Justin Bieber Performs 'Love Yourself' on the ELLEN SHOW" were labelled
+                  # official). "Official Performance Video" (a studio take of the record) is not one of these.
+                  r"|\bperform(?:s|ed|ing)?\b|\b(?:mtv )?vmas?\b|\bamas\b|\bgrammys?\b|\bbrit awards\b|\bmusic awards\b|"
+                  r"academy awards|\boscars\b|awards? (?:show|ceremony)|tonight show|jimmy fallon|kimmel|\bsnl\b|"
+                  r"saturday night live|late night with|late show|ellen show|\bon the voice\b|\bthe voice (?:usa|uk|ph|philippines)\b|"
+                  r"got talent|x factor|american idol|jools holland|tiny desk|\bat the bbc\b|bbc proms|radio 1|jingle ball|"
+                  r"\bfull performance\b|half ?time show", re.I)
 # Learned from our own library (2026-11-21): "Official HD Music Video", "Official Performance Video", a bare
 # "(Official)" and "(Music Video)" are official too; "(Roblox Music Video)" is not (only a bare bracket counts).
 OFFICIAL = re.compile(r"official\b[^()\[\]|]{0,25}?\bvideo\b|[\[(]\s*official\s*[\])]|[\[(]\s*music video\s*[\])]|\bm/?v\b|official mv|뮤직비디오", re.I)
@@ -98,9 +107,14 @@ def search(query: str, page: int = 0, size: int = 10) -> list[dict]:
 # lands on the singer; a longer video (story intro, extra scene) puts every line early.
 LYRICS_TOLERANCE = 3.0
 
+def fold(text: str) -> str:
+    """karaoke-server: casefold without accents, so "GIVĒON" and "Giveon" (or "Beyoncé"/"Beyonce") compare equal."""
+    text = "".join(ch for ch in unicodedata.normalize("NFKD", text or "") if not unicodedata.combining(ch))
+    return unicodedata.normalize("NFC", text).casefold()
+
 def song_name(title: str) -> str:
     """A song's name for matching versions: no "ft. X", "(Remastered)", "- From the film", case or punctuation."""
-    title = re.split(r"\s+(?:ft\.?|feat\.?|featuring|with)\s|[(\[]|\s-\s", (title or "").casefold())[0]
+    title = re.split(r"\s+(?:ft\.?|feat\.?|featuring|with)\s|[(\[]|\s-\s", fold(title or ""))[0]
     return re.sub(r"\W+", "", title)
 
 def record_song(track: str, artist: str) -> str:
@@ -115,13 +129,13 @@ def mark_lyrics(results: list[dict], records: list[tuple], tolerance: float = LY
     records: (song_name, seconds[, artist keys or a lead artist[, version tag]]) from LRCLIB."""
     for r in results:
         name = song_name((r.get("parsed") or {}).get("title", "")) or song_name(r.get("title", ""))
-        whole = re.sub(r"\W+", "", (r.get("title") or "").casefold())
-        text = whole + re.sub(r"\W+", "", f"{r.get('channel') or ''}{(r.get('parsed') or {}).get('artist', '')}".casefold())
+        whole = re.sub(r"\W+", "", fold(r.get("title") or ""))
+        text = whole + re.sub(r"\W+", "", fold(f"{r.get('channel') or ''}{(r.get('parsed') or {}).get('artist', '')}"))
         # the song's name, or (for titles like "Adele   Hello" that don't split) found inside the title; and the
         # record's artist in the title, channel or names (a flashmob of "Bohemian Rhapsody" is not Queen's)
         named = lambda artists: not artists or any(a in text for a in ([artists] if isinstance(artists, str) else artists))
         # a remix/live/instrumental record only vouches for a video of that version
-        version = lambda tag: not tag or tag.casefold() in (r.get("title") or "").casefold()
+        version = lambda tag: not tag or fold(tag) in fold(r.get("title") or "")
         same = lambda rec: (rec[0] == name or (len(rec[0]) >= 4 and rec[0] in whole)) and named(rec[2] if len(rec) > 2 else "") \
             and version(rec[3] if len(rec) > 3 else "")
         diffs = [abs((r.get("duration") or 0) - rec[1]) for rec in records if rec[0] and same(rec)]
@@ -145,7 +159,7 @@ def artist_keys(artist: str) -> set[str]:
     """Each artist in a credit ("Keala Settle & The Greatest Showman Ensemble"), also without generic words
     ("The Greatest Showman"), normalized; for checking a video names the record's artist."""
     keys = set()
-    for part in re.split(r",|&|/|\+| x | and | feat\.? | ft\.? | with ", (artist or "").casefold()):
+    for part in re.split(r",|&|/|\+| x | and | feat\.? | ft\.? | with ", fold(artist or "")):
         for name in (part, GENERIC.sub(" ", part)):
             key = re.sub(r"\W+", "", name)
             if len(key) >= 3:
@@ -153,7 +167,7 @@ def artist_keys(artist: str) -> set[str]:
     return keys
 
 def lead_artist(artist: str) -> str:
-    return re.sub(r"\W+", "", re.split(r",|&| x | and | feat\.? | ft\.? | with ", (artist or "").casefold())[0])
+    return re.sub(r"\W+", "", re.split(r",|&| x | and | feat\.? | ft\.? | with ", fold(artist or ""))[0])
 
 def names_from_records(results: list[dict], records: list[dict]) -> None:
     """records: LRCLIB rows with "artistName"/"trackName". Sets r["parsed"] (keeping the old one as "guessed")."""
@@ -164,7 +178,7 @@ def names_from_records(results: list[dict], records: list[dict]) -> None:
         track, artist = song_name(name), lead_artist(by)
         # records uploaded from a video player carry its title ("Ed Sheeran - Shape Of You (Official Video)")
         if len(track) < 2 or len(artist) < 2 or track == artist or " - " in name or LABELS.search(name) or LABELS.search(by) \
-                or artist in re.sub(r"\W+", "", name.casefold()):  # "Ed Sheeran-Perfect": the artist glued into the song
+                or artist in re.sub(r"\W+", "", fold(name)):  # "Ed Sheeran-Perfect": the artist glued into the song
             continue
         votes.setdefault(track, {}).setdefault(artist, Counter())[(by, name)] += 1
     # records with artist and song the wrong way round: a "song" that is also an artist's name is not one
@@ -187,28 +201,37 @@ def names_from_records(results: list[dict], records: list[dict]) -> None:
             del votes[track]
     # the spelling most records agree on (album uploads outnumber the odd one), then the shortest
     # (a plain name beats a remix/live/instrumental spelling: "This Is Me", not "This Is Me (Dave Audé Remix)")
-    known = {track: {artist: dict(zip(("artistName", "trackName"), min(spellings, key=lambda k: (bool(VERSION_TAG.search(k[1])), -spellings[k], len(k[1])))))
-                     for artist, spellings in artists.items()} for track, artists in votes.items()}
+    # Names are compared without accents ("Beyoncé" = "Beyonce" is one vote), but a video gets the spelling it uses
+    # itself when a record has it ("Corazón partío" for a video titled so).
+    key = lambda spellings: lambda k: (bool(VERSION_TAG.search(k[1])), -spellings[k], len(k[1]))
+    known = {track: {artist: spellings for artist, spellings in artists.items()} for track, artists in votes.items()}
     for r in results:
         parsed = r.get("parsed") or {}
-        title = re.sub(r"\W+", "", (r.get("title") or "").casefold())
-        text = title + re.sub(r"\W+", "", (r.get("channel") or "").casefold())
+        title = re.sub(r"\W+", "", fold(r.get("title") or ""))
+        text = title + re.sub(r"\W+", "", fold(r.get("channel") or ""))
+        own = re.sub(r"\W+", "", f"{r.get('title') or ''}{r.get('channel') or ''}".casefold())
+        def pick(spellings):
+            best = min(spellings, key=key(spellings))
+            same = lambda k: [fold(x) for x in k] == [fold(x) for x in best] and all(re.sub(r"\W+", "", re.split(r"[(\[]|\s-\s|\s(?:ft|feat)\.?\s", x.casefold())[0]) in own for x in k)
+            variants = [k for k in spellings if [fold(x) for x in k] == [fold(x) for x in best]]
+            capitalized = [k for k in variants if not " ".join(k).islower()] if " ".join(best).islower() else []
+            return dict(zip(("artistName", "trackName"), min([k for k in spellings if same(k)] or capitalized or [best], key=key(spellings))))
         exact = {song_name(parsed.get("title", "")), song_name(parsed.get("artist", ""))}  # either way round
         best = None
         for track, artists in known.items():
             if track not in exact and not (len(track) >= 4 and track in title):
                 continue
-            named = [c for a, c in artists.items() if a in text]
+            named = [pick(c) for a, c in artists.items() if a in text]
             # the artist must be in the title or channel
             # (an artist is only filled in when the title names none: "Eye of the Tiger" alone)
-            chosen = named[0] if len(named) == 1 else next(iter(artists.values())) if not named and len(artists) == 1 \
+            chosen = named[0] if len(named) == 1 else pick(next(iter(artists.values()))) if not named and len(artists) == 1 \
                 and track == song_name(parsed.get("title", "")) and not parsed.get("artist") else None
             if chosen and (best is None or len(track) > len(best[0])):
                 best = (track, chosen)
         if best:
             title = best[1]["trackName"]
             tag = VERSION_TAG.search(title)
-            if tag and tag.group(0).casefold() not in (r.get("title") or "").casefold():
+            if tag and fold(tag.group(0)) not in fold(r.get("title") or ""):
                 # only a remix/live spelling exists for this artist, and this video isn't that version: drop the tag
                 title = re.sub(r"\s*[(\[][^()\[\]]*" + re.escape(tag.group(0)) + r"[^()\[\]]*[)\]]|\s+-\s+[^-]*" + re.escape(tag.group(0)) + r".*$",
                                "", title, flags=re.I).strip() or title
@@ -220,13 +243,13 @@ def order_results(results: list[dict], query: str = "") -> list[dict]:
     lyrics off (user, 2026-11-21). Different songs keep YouTube's relevance order."""
     def song(r):
         # the song's name alone: no "ft. X", no "(Explicit)", "(Taylor's Version)", "(2003 Edit)"...
-        title = (r.get("parsed") or {}).get("title", "").casefold()
+        title = fold((r.get("parsed") or {}).get("title", ""))
         title = re.split(r"\s+(?:ft\.?|feat\.?|featuring)\s|[(\[]", title)[0]
         return re.sub(r"\W+", "", title) or r["id"]
     first = {}
     for i, r in enumerate(results):
         first.setdefault(song(r), i)
-    wanted = re.sub(r"\W+", "", (query or "").casefold())
+    wanted = re.sub(r"\W+", "", fold(query or ""))
     def key(r):
         # karaoke-server: results whose length matches synced lyrics first (official ones first, then lyric videos...),
         # then the rest as before (covers and live versions are never marked as matching: see mark_lyrics)
