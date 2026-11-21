@@ -14,7 +14,7 @@ function toast(text,action,kind){
  if(action){$('toast-action').textContent=action.label;$('toast-action').onclick=()=>{$('toast').classList.remove('on');action.run();};}
  $('toast').classList.add('on');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.remove('on'),action?6000:2600);
 }
-const sendRaw=connect('remote',render,message=>toast(message,undefined,'err'));
+const sendRaw=connect('remote',render,message=>toast(message,undefined,'err'),undefined,event=>onFun(event));
 // karaoke-server: settings carry who's changing them; the server saves them to that singer's profile (live only on their own song).
 const PROFILE_ACTIONS=new Set(['vocal','music','key','speed','lyric_scale','video_mode','lyric_mode']);
 const send=message=>sendRaw(PROFILE_ACTIONS.has(message.action)&&singer()?{...message,singer:singer(),device:deviceId()}:message);
@@ -77,7 +77,7 @@ new IntersectionObserver(([entry])=>{
 },{rootMargin:'0px 0px -40px 0px'}).observe($('hero'));
 $('dock-queue').onclick=()=>$('queue').scrollIntoView({behavior:REDUCED.matches?'auto':'smooth',block:'center'});
 // Reactions float up on this phone and on the TV. Quick taps add up into one "×3" note.
-for(const button of document.querySelectorAll('.react'))button.onclick=()=>{
+for(const button of document.querySelectorAll('.react[data-emoji]'))button.onclick=()=>{  // karaoke-server: 💬/📷 are .react too
  const emoji=button.dataset.emoji;send({action:'react',value:emoji});haptic(6);
  const box=button.getBoundingClientRect(),count=REDUCED.matches?1:5;
  for(let i=0;i<count;i++){
@@ -522,3 +522,36 @@ $('lock-go').onclick=()=>{if(Date.now()<unlockedUntil)return lockSettings();if(c
 $('lock-cancel').onclick=()=>{confirming=false;renderLock();};
 document.addEventListener('visibilitychange',()=>{if(document.hidden)lockSettings();});
 lockSettings();
+
+// karaoke-server: fun extras. A shout-out (short text) or a photo pops up on the TV with your singer name.
+// Photos are shrunk on the phone first (longest side 1280 px, JPEG), so they upload fast even on the slow route.
+function onFun(event){
+ if(event.type!=='fun')return;
+ const what=event.kind==='photo'?'Photo':'Shout-out';
+ toast(`${what} from ${event.name} on the TV`,{label:'Hide',run:()=>send({action:'hide',id:event.id})});
+}
+$('shout-open').onclick=()=>{if(!singer())return askName();$('shout-input').value='';$('shout-count').textContent='0/60';$('shout-box').hidden=false;setTimeout(()=>$('shout-input').focus(),50);};
+$('shout-cancel').onclick=()=>{$('shout-box').hidden=true;};
+$('shout-input').oninput=()=>{$('shout-count').textContent=`${$('shout-input').value.length}/60`;};
+$('shout-form').onsubmit=e=>{e.preventDefault();const text=$('shout-input').value.trim();if(!text)return;
+ send({action:'shout',value:text,singer:singer(),device:deviceId()});$('shout-box').hidden=true;haptic([10,30,10]);};
+async function shrinkPhoto(file){
+ const bitmap=await createImageBitmap(file,{imageOrientation:'from-image'}).catch(()=>createImageBitmap(file));
+ const scale=Math.min(1,1280/Math.max(bitmap.width,bitmap.height));
+ const canvas=document.createElement('canvas');canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);
+ canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close?.();
+ for(const quality of [0.8,0.65,0.5]){const blob=await new Promise(r=>canvas.toBlob(r,'image/jpeg',quality));if(blob&&blob.size<=600000)return blob;}
+ throw new Error('That photo is too big');
+}
+$('photo-open').onclick=()=>{if(!singer())return askName();$('photo-input').value='';$('photo-input').click();};
+$('photo-input').onchange=async()=>{
+ const file=$('photo-input').files?.[0];if(!file)return;
+ $('photo-open').disabled=true;toast('Sending photo…');
+ try{
+  const blob=await shrinkPhoto(file);
+  const r=await fetch('/api/photo',{method:'POST',headers:{'Content-Type':'image/jpeg','X-Singer':encodeURIComponent(singer()),'X-Device':deviceId()},body:blob});
+  if(!r.ok){let m=`Couldn't send (${r.status})`;try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
+  haptic([10,30,10]);
+ }catch(error){toast(error.message,undefined,'err');}
+ finally{$('photo-open').disabled=false;}
+};

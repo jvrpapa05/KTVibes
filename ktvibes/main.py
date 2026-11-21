@@ -7,9 +7,10 @@ import shutil
 from pathlib import Path
 import socket
 import math
+from urllib.parse import unquote  # karaoke-server: singer names in photo headers are URL-encoded
 import qrcode
 import qrcode.image.svg
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
@@ -267,6 +268,29 @@ def remote_url():
 @app.get("/api/config")
 async def config():
     return {"remote_url": remote_url(), "version": VERSION}  # karaoke-server: version too
+
+PHOTO_TYPES = {b"\xff\xd8\xff": "image/jpeg", b"\x89PNG": "image/png", b"RIFF": "image/webp"}
+
+@app.post("/api/photo", status_code=201)
+async def photo_upload(request: Request):
+    """karaoke-server: a phone sends a (shrunk) photo; it pops up on the TV as a polaroid with the sender's name.
+    The body is the image itself; X-Singer and X-Device say who sent it."""
+    data = await request.body()
+    kind = next((t for magic, t in PHOTO_TYPES.items() if data.startswith(magic)), None)
+    if kind is None:
+        raise HTTPException(415, "Send a JPEG, PNG or WebP photo")
+    try:
+        item = await state.add_photo(data, kind, unquote(request.headers.get("x-singer", "")), request.headers.get("x-device", ""))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"id": item["id"]}
+
+@app.get("/api/photo/{photo_id}")
+async def photo(photo_id: str):
+    item = state.photos.get(photo_id)
+    if item is None:
+        raise HTTPException(404)
+    return Response(item["data"], media_type=item["type"], headers={"Cache-Control": "private, max-age=43200"})
 
 @app.get("/api/qr.svg")
 async def qr():

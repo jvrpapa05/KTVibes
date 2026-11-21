@@ -254,6 +254,36 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertRegex(VERSION, r'^\d+\.\d+\.\d+$')
         self.assertEqual(State().snapshot()['version'], VERSION)
 
+    async def test_shout_outs_and_photos_pop_up_on_the_tv_with_a_name(self):
+        # karaoke-server: fun extras. Always named, 60 characters max, one per phone per 10 s, photos in memory only.
+        import ktvibes.queue as q
+        state = State(); state.claim_singer('Vince', 'phone-v')
+        tv, sent = object(), []
+        async def fake_send(ws, message):
+            sent.append((ws, message)); return True
+        state.send = fake_send; state.player = tv; state.clients = {tv: 'tv', 'remote-1': 'remote'}
+        with self.assertRaisesRegex(ValueError, 'Pick your name'):
+            await state.control({'action': 'shout', 'value': 'hi', 'singer': 'Vince', 'device': 'someone-else'})
+        await state.control({'action': 'shout', 'value': '  You   got this! ' + 'x' * 80, 'singer': 'vince', 'device': 'phone-v'})
+        shout = next(m for ws, m in sent if ws is tv and m['type'] == 'shout')
+        self.assertEqual((shout['name'], len(shout['text'])), ('Vince', 60))
+        self.assertTrue(shout['text'].startswith('You got this! '))
+        self.assertTrue(any(ws == 'remote-1' and m == {'type': 'fun', 'kind': 'shout', 'id': shout['id'], 'name': 'Vince'} for ws, m in sent))
+        with self.assertRaisesRegex(ValueError, 'Wait'):
+            await state.control({'action': 'shout', 'value': 'again', 'singer': 'Vince', 'device': 'phone-v'})
+        state.fun_last['phone-v'] -= q.FUN_COOLDOWN
+        item = await state.add_photo(b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
+        self.assertIn(item['photo'], state.photos)
+        self.assertEqual(state.photos[item['photo']]['name'], 'Vince')
+        state.fun_last['phone-v'] -= q.FUN_COOLDOWN
+        with self.assertRaisesRegex(ValueError, 'too big'):
+            await state.add_photo(b'0' * (q.PHOTO_MAX_BYTES + 1), 'image/jpeg', 'Vince', 'phone-v')
+        state.photos[item['photo']]['at'] -= q.PHOTO_KEEP + 1          # the night is over: pruned on the next photo
+        await state.add_photo(b'\xff\xd8\xff1', 'image/jpeg', 'Vince', 'phone-v')
+        self.assertNotIn(item['photo'], state.photos)
+        await state.control({'action': 'hide', 'id': shout['id']})
+        self.assertEqual(sent[-1], (tv, {'type': 'hide', 'id': shout['id']}))
+
     def test_singer_names_are_unique_per_phone_until_idle(self):
         state = State()
         self.assertEqual(state.claim_singer('  Anna ', 'phone-1'), 'Anna')

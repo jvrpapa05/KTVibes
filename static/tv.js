@@ -51,7 +51,7 @@ function setAmbient(on){
 }
 ambient.onended=nextAmbient;
 ambient.onerror=()=>{if(!ambientOn)return;ambientIds=ambientIds.filter(id=>id!==ambient.dataset.id);nextAmbient();};
-const send=connect('tv',render,error,()=>{restoring=true;send({action:'audio',value:enabled});if(currentKey&&finishedKey===currentKey)send({action:'ended',key:currentKey});},event=>{if(event.type==='react')cheer(event.value);else if(event.type==='dial')dial(event.digits);else if(event.type==='reserved')reserved(event.number);});
+const send=connect('tv',render,error,()=>{restoring=true;send({action:'audio',value:enabled});if(currentKey&&finishedKey===currentKey)send({action:'ended',key:currentKey});},event=>{if(event.type==='react')cheer(event.value);else if(event.type==='shout')showShout(event);else if(event.type==='photo')showPhoto(event);else if(event.type==='hide')hideFun(event.id);else if(event.type==='dial')dial(event.digits);else if(event.type==='reserved')reserved(event.number);});
 function saved(){try{return JSON.parse(localStorage.getItem(SETTINGS))||{};}catch{return {};}}
 function remember(s){try{localStorage.setItem(SETTINGS,JSON.stringify(Object.fromEntries(SETTING_KEYS.map(k=>[k,s[k]]))));}catch{}}
 function restore(s){const mine=saved();for(const action of SETTING_KEYS){const value=mine[action];if(value!==undefined&&value!==s[action])send({action,value});}}
@@ -484,3 +484,21 @@ for(const type of ['pointermove','pointerdown','keydown'])addEventListener(type,
 wake();
 function scaleUi(){document.body.style.setProperty('--ui',Math.max(1,Math.min(innerWidth/1920,innerHeight/1080)));}
 addEventListener('resize',scaleUi);scaleUi();
+
+// karaoke-server: fun extras from the phones. Shout-outs slide in bottom-left; photos pop up top-right as a
+// polaroid. Both carry the sender's name, leave on their own, and any phone can hide them early.
+const funStack=el('div',undefined,'fun-stack');document.body.append(funStack);
+function leave(node,after){setTimeout(()=>{node.classList.add('out');setTimeout(()=>node.remove(),600);},after);}
+function showShout(e){
+ const node=el('div',undefined,'shout');node.dataset.id=e.id;node.append(el('b',e.name),el('span',e.text));
+ funStack.append(node);while(funStack.children.length>3)funStack.firstChild.remove();
+ leave(node,REDUCED.matches?5000:6500);
+}
+function showPhoto(e){
+ const card=el('figure',undefined,'polaroid');card.dataset.id=e.id;
+ const image=el('img');image.alt='';image.src=`/api/photo/${encodeURIComponent(e.photo)}`;
+ card.style.setProperty('--tilt',`${(Math.random()*8-4).toFixed(1)}deg`);
+ card.append(image,el('figcaption',`📷 ${e.name}`));
+ image.onload=()=>{for(const old of document.querySelectorAll('.polaroid:not(.out)'))old.classList.add('out');document.body.append(card);leave(card,8000);};
+}
+function hideFun(id){for(const node of document.querySelectorAll('.shout,.polaroid'))if(node.dataset.id===id){node.classList.add('out');setTimeout(()=>node.remove(),600);}}

@@ -15,6 +15,12 @@ def following(options, current):
 
 GUIDES = ("off", "latin", "jyutping", "hangul")
 REACTIONS = ("👏", "🔥", "🎉", "💚")  # cheers a remote can float up on the TV
+# karaoke-server: shout-outs (short text) and photos that pop up on the TV, always with the sender's singer name.
+FUN_COOLDOWN = 10  # seconds between shout-outs/photos from one phone
+SHOUT_MAX = 60  # characters
+PHOTO_MAX_BYTES = 1_000_000  # phones shrink photos to ~150 KB before sending
+PHOTO_KEEP = 12 * 3600  # photos live in memory only, for the night
+PHOTO_LIMIT = 60
 # karaoke-server: our own SemVer, hand-maintained in ktvibes/VERSION and bumped with every change (upstream's
 # version in pyproject.toml is left alone so merges stay clean). Shown faintly on the TV and the remote.
 VERSION = (Path(__file__).with_name("VERSION").read_text(encoding="utf-8").strip() if Path(__file__).with_name("VERSION").is_file() else "dev")
@@ -67,6 +73,8 @@ class State:
         self.undo = None  # the last removal, for the remote's Undo toast
         self.singers = {}  # karaoke-server: name key -> {"name", "device", "seen"}; one phone per name at a time
         self.profiles = {}  # karaoke-server: name key -> {setting: value for PROFILE}, applied on that singer's songs
+        self.fun_last = {}  # karaoke-server: device -> unix time of its last shout-out or photo
+        self.photos = {}  # karaoke-server: photo id -> {"data", "type", "name", "at"}; memory only, never saved
         self.saved_at = 0.0
         self.build = ""  # fingerprint of the web app files; open pages reload when it changes
         self.lyrics_sent = {}  # TV socket -> key of the song whose lyrics it already has
@@ -293,8 +301,58 @@ class State:
             raise ValueError(f"Unknown {action.replace('_', ' ')}")
         return value
 
+    def sender_name(self, singer, device):
+        """karaoke-server: the singer name a phone holds; fun posts always carry it."""
+        holder = self.singers.get(" ".join(str(singer or "").split()).casefold())
+        if not holder or not device or holder["device"] != device:
+            raise ValueError("Pick your name on the remote first")
+        holder["seen"] = time.time()
+        return holder["name"]
+
+    def fun_allowed(self, device):
+        now = time.time()
+        wait = FUN_COOLDOWN - (now - self.fun_last.get(device, 0))
+        if wait > 0:
+            raise ValueError(f"Wait {int(wait) + 1} s before sending another")
+        self.fun_last[device] = now
+
+    async def show_fun(self, kind, name, **extra):
+        """Pop a shout-out or photo up on the TV, and let every remote offer to hide it."""
+        item = {"type": kind, "id": uuid.uuid4().hex[:12], "name": name, **extra}
+        if self.player is not None:
+            await self.send(self.player, item)
+        notice = {"type": "fun", "kind": kind, "id": item["id"], "name": name}
+        await asyncio.gather(*(self.send(ws, notice) for ws, role in list(self.clients.items()) if role != "tv"))
+        return item
+
+    async def add_photo(self, data, kind, singer, device):
+        name = self.sender_name(singer, device)
+        if len(data) > PHOTO_MAX_BYTES:
+            raise ValueError("That photo is too big")
+        self.fun_allowed(device)
+        now = time.time()
+        self.photos = {k: v for k, v in self.photos.items() if now - v["at"] < PHOTO_KEEP}
+        while len(self.photos) >= PHOTO_LIMIT:
+            self.photos.pop(next(iter(self.photos)))
+        photo_id = uuid.uuid4().hex
+        self.photos[photo_id] = {"data": data, "type": kind, "name": name, "at": now}
+        return await self.show_fun("photo", name, photo=photo_id)
+
     async def control(self, message, sender=None):
         action = message.get("action")
+        if action == "shout":
+            name = self.sender_name(message.get("singer"), message.get("device"))
+            text = " ".join(str(message.get("value") or "").split())[:SHOUT_MAX]
+            if not text:
+                raise ValueError("Type a message")
+            self.fun_allowed(message.get("device"))
+            await self.show_fun("shout", name, text=text)
+            return
+        if action == "hide":
+            # Any phone can take a shout-out or photo off the TV.
+            if self.player is not None:
+                await self.send(self.player, {"type": "hide", "id": str(message.get("id", ""))[:32]})
+            return
         if self.own_profile_edit(message):
             key = str(message["singer"]).casefold()
             # A first-timer's profile starts from the room as it is now.
