@@ -98,6 +98,50 @@ class Removed(Exception):
 
 # Video downloads still running, by video id: a song queued again reuses its download instead of starting a second.
 videos = {}
+# karaoke-server: audio downloads still running, by video id (the prefetcher's), so the worker waits for one
+# instead of starting a second download of the same song.
+audio_jobs = {}
+PREFETCH_AHEAD = 3  # queued songs whose audio and video download ahead, while an earlier song is being separated
+PREFETCH_PAUSE = 2  # seconds between looks at the queue
+
+def fetch_audio(video_id, folder):
+    """Download a song's audio and keep what yt-dlp says about it (duration, title) in its meta.json."""
+    result = youtube.download(video_id, folder)
+    try:
+        meta = json.loads((folder / "meta.json").read_text())
+    except (OSError, ValueError):
+        meta = {}
+    meta.update(result)
+    save_meta(folder, meta)
+    return result
+
+async def prefetch(state, cache: Path):
+    """karaoke-server: download the next few queued songs' audio and video in the background, one file at a time.
+    Downloads use the network, not the CPU, so they never slow the song being separated; when a song's turn
+    comes it can start separating at once. A failure here is harmless: the worker downloads it itself later."""
+    while True:
+        await asyncio.sleep(PREFETCH_PAUSE)
+        for item in [i for i in state.upcoming if i["status"] == "queued"][:PREFETCH_AHEAD]:
+            folder = cache / item["id"]
+            try:
+                if stems.ready(folder):
+                    continue
+                folder.mkdir(parents=True, exist_ok=True)
+                if not (folder / "audio.m4a").is_file() and item["id"] not in audio_jobs:
+                    job = audio_jobs[item["id"]] = asyncio.ensure_future(asyncio.to_thread(fetch_audio, item["id"], folder))
+                    try:
+                        await job
+                    finally:
+                        audio_jobs.pop(item["id"], None)
+                    log.info("Prefetched audio for %s", item["id"])
+                    break  # one download per pass; look at the queue again
+                if not (folder / "video.mp4").is_file() and (item["id"] not in videos or videos[item["id"]].done()):
+                    job = videos[item["id"]] = asyncio.ensure_future(asyncio.to_thread(fetch_video, item["id"], folder, None))
+                    await job
+                    log.info("Prefetched video for %s", item["id"])
+                    break
+            except Exception:
+                log.warning("Prefetch failed for %s; it will be downloaded when its turn comes", item["id"], exc_info=True)
 
 async def run(state, cache: Path):
     while True:
@@ -128,6 +172,17 @@ async def run(state, cache: Path):
                 # Songs cached as WAV or FLAC convert in seconds instead of separating again.
                 gain = await asyncio.to_thread(stems.migrate, folder, meta.get("stem_gain"))
                 if gain is None:
+                    if not (folder / "audio.m4a").is_file() and (job := audio_jobs.get(item["id"])) and not job.done():
+                        # karaoke-server: the prefetcher is already downloading it: wait for that, then read its meta.
+                        item["status"], item["step"], item["progress"] = "downloading", "audio", 0.0
+                        await state.broadcast()
+                        while not job.done():
+                            await asyncio.wait({job}, timeout=0.5)
+                            check()
+                        try:
+                            meta.update(json.loads(meta_path.read_text()))
+                        except (OSError, ValueError):
+                            pass
                     if not (folder / "audio.m4a").is_file():
                         item["status"], item["step"], item["progress"] = "downloading", "audio", 0.0
                         await state.broadcast()

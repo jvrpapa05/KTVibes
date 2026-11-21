@@ -315,6 +315,31 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         finally:
             w.STEP_RATE.update(saved)
 
+    async def test_next_songs_download_ahead_one_file_at_a_time(self):
+        # karaoke-server: while a song separates, the next PREFETCH_AHEAD queued songs get their audio and video.
+        import ktvibes.worker as w
+        state = State()
+        items = [await state.add(f'song{n}abcde'[:11], 'A', f'S{n}') for n in range(5)]
+        items[0]['status'] = 'separating'                       # the worker is busy with this one
+        busy = []
+        def fake_audio(vid, folder, progress=None):
+            busy.append(vid); assert len([b for b in busy if b]) == 1  # never two downloads at once
+            (folder / 'audio.m4a').write_bytes(b'a'); busy.remove(vid); return {'duration': 200, 'source_title': vid}
+        def fake_video(vid, folder, progress=None):
+            (folder / 'video.mp4').write_bytes(b'v')
+        with tempfile.TemporaryDirectory() as folder, \
+             unittest.mock.patch.object(w.youtube, 'download', fake_audio), \
+             unittest.mock.patch.object(w.youtube, 'download_video', fake_video), \
+             unittest.mock.patch.object(w, 'PREFETCH_PAUSE', 0.01):
+            cache = Path(folder)
+            task = asyncio.create_task(w.prefetch(state, cache))
+            await asyncio.sleep(1.0); task.cancel()
+            done = {i['id']: ((cache / i['id'] / 'audio.m4a').is_file(), (cache / i['id'] / 'video.mp4').is_file()) for i in items}
+            self.assertEqual([done[i['id']] for i in items[1:4]], [(True, True)] * 3)   # the next three
+            self.assertEqual(done[items[4]['id']], (False, False))                       # not the fourth
+            self.assertEqual(done[items[0]['id']], (False, False))                       # nor the one the worker has
+            self.assertEqual(json.loads((cache / items[1]['id'] / 'meta.json').read_text())['duration'], 200)
+
     def test_singer_names_are_unique_per_phone_until_idle(self):
         state = State()
         self.assertEqual(state.claim_singer('  Anna ', 'phone-1'), 'Anna')

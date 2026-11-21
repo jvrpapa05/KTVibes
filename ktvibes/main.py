@@ -29,12 +29,14 @@ async def lifespan(app):
     await asyncio.to_thread(songbook.backfill, CACHE, stems.prepared)  # caches from before the songbook
     state.restore(CACHE / "queue.json", seed=lambda: {id: meta["prepared"] for id, meta in prepared_songs().items()})
     task = asyncio.create_task(worker.run(state, CACHE))
+    ahead = asyncio.create_task(worker.prefetch(state, CACHE))  # karaoke-server: download the next songs early
     try:
         yield
     finally:
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+        for running in (task, ahead):
+            running.cancel()
+            with suppress(asyncio.CancelledError):
+                await running
 
 def build() -> str:
     """Fingerprint of the files the pages load. A TV left open across an update reloads itself
