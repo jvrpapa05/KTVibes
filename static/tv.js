@@ -82,7 +82,7 @@ function render(next){
   if(state.current){
    const item=state.current;
    video.hidden=!item.video;$('video-shade').hidden=!item.video;
-   if(item.video){video.src=`/media/${item.id}/video.mp4`;video.load();}else{video.removeAttribute('src');video.load();}
+   if(item.video){video.src=videoFile(item);video.load();watchFps(item);}else{video.removeAttribute('src');video.load();}
    stemGain=item.gain||1;applyGain();seekTo=state.position||0;music.src=`/media/${item.id}/no_vocals`;voice.src=`/media/${item.id}/vocals`;music.load();voice.load();
    $('song-title').textContent=item.title;$('song-artist').textContent=item.artist;$('now-art').src=thumbnail(item.id);$('song-singer').textContent=item.singer||'';$('song-singer').hidden=!item.singer;$('next-singer').textContent=item.singer?`🎤 ${item.singer}`:'';$('next-singer').hidden=!item.singer;$('next-title').textContent=$('card-title').textContent=item.title;$('next-art').src=thumbnail(item.id,'hqdefault');$('next-artist').textContent=$('card-artist').textContent=item.artist;$('card-number').textContent=item.number??'-----';$('card-credit').textContent=`원곡 ${item.artist}`;$('spec-length').textContent=clock(item.duration);
    showLyrics(item);$('duration').textContent=clock(item.duration);
@@ -561,6 +561,8 @@ setInterval(()=>{
  if(!state?.current||video.paused||video.hidden||!video.videoHeight)return;
  const q=video.getVideoPlaybackQuality?.()||{droppedVideoFrames:0,totalVideoFrames:0};
  const dropped=q.droppedVideoFrames-lastFrames.dropped,total=q.totalVideoFrames-lastFrames.total;lastFrames={dropped:q.droppedVideoFrames,total:q.totalVideoFrames};
+ // karaoke-server: a new video source restarts the browser's counters; skip that window instead of reporting nonsense
+ if(dropped<0||total<0){tvStats.jumps=0;tvStats.waits=0;tvStats.maxDrift=0;return;}
  send({action:'tv_stats',value:{song:state.current.id,height:video.videoHeight,dropped,frames:total,waits:tvStats.waits,jumps:tvStats.jumps,max_drift:Math.round(tvStats.maxDrift*1000),agent:navigator.userAgent.slice(0,160)}});
  tvStats.jumps=0;tvStats.waits=0;tvStats.maxDrift=0;
 },30000);
@@ -602,4 +604,26 @@ const QR_FULL_SECONDS=20;
 setInterval(()=>{
  const playingLong=!!state?.current&&!document.body.classList.contains('between')&&music.currentTime>QR_FULL_SECONDS;
  $('corner-join').classList.toggle('small',playingLong);
+},1000);
+
+// karaoke-server: 60 fps videos keep their original file, and the server also makes a 30 fps copy (video-30.mp4).
+// The TV plays the original; if it drops more than 10% of frames in the first seconds, it switches to the copy at
+// the same spot and remembers that this screen can't keep up with 60 fps, so later ones start on the copy.
+const PREFER_30='karaoke.prefer30fps';
+const prefer30=()=>{try{return localStorage.getItem(PREFER_30)==='1';}catch{return false;}};
+let fpsWatch=null;
+function videoFile(item){return `/media/${item.id}/${item.video_30&&prefer30()?'video-30.mp4':'video.mp4'}`;}
+function watchFps(item){fpsWatch=item.video_30&&!prefer30()?{key:item.key,id:item.id,base:null}:null;}
+setInterval(()=>{
+ const w=fpsWatch;if(!w||state?.current?.key!==w.key||video.paused||!video.getVideoPlaybackQuality)return;
+ const q=video.getVideoPlaybackQuality();
+ if(!w.base){w.base={d:q.droppedVideoFrames,t:q.totalVideoFrames};return;}
+ const dropped=q.droppedVideoFrames-w.base.d,total=q.totalVideoFrames-w.base.t;
+ if(total<90)return;  // ~3 s of video before judging
+ fpsWatch=null;
+ if(dropped/total<=.1)return;  // this screen copes: keep 60 fps
+ try{localStorage.setItem(PREFER_30,'1');}catch{}
+ const at=music.currentTime;video.src=`/media/${w.id}/video-30.mp4`;video.load();
+ video.addEventListener('loadedmetadata',()=>{video.currentTime=music.currentTime||at;},{once:true});
+ console.info(`60 fps video dropped ${Math.round(100*dropped/total)}% of frames: switched to the 30 fps copy`);
 },1000);

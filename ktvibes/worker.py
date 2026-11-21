@@ -205,6 +205,7 @@ async def run(state, cache: Path):
             if video and (warning := await video):
                 item["video_warning"] = warning
             item["video"] = (folder / "video.mp4").is_file()
+            item["video_30"] = (folder / "video-30.mp4").is_file()  # karaoke-server: 30 fps fallback for 60 fps videos
             item["duration"] = sf.info(stems.path(folder, "no_vocals")).duration
             # Where the song stops, before any trailing silence: Classic scores it there. Remembered per stem
             # file, and left unset (the TV waits for the file's end) if a stem can't be read.

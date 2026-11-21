@@ -149,6 +149,33 @@ def download_video(video_id: str, directory: Path, progress=None) -> None:
                    check=True, capture_output=True)
     temporary.replace(directory / "video.mp4")
     source.unlink(missing_ok=True)
+    make_30fps(directory)
+
+# karaoke-server: a 60 fps video stays as downloaded (the best source), and gets a 30 fps copy at the same
+# resolution, video-30.mp4, made at low CPU priority. A TV that drops frames on the original switches to the copy.
+def video_fps(path: Path) -> float:
+    out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate",
+                          "-of", "csv=p=0", str(path)], capture_output=True, text=True).stdout.strip()
+    try:
+        num, _, den = out.partition("/")
+        return float(num) / float(den or 1)
+    except (ValueError, ZeroDivisionError):
+        return 0.0
+
+def make_30fps(directory: Path) -> bool:
+    """Make (or refresh) video-30.mp4 when video.mp4 runs faster than 30 fps; True if a copy exists afterwards."""
+    video, copy = directory / "video.mp4", directory / "video-30.mp4"
+    if not video.is_file() or video_fps(video) <= 31:
+        copy.unlink(missing_ok=True)
+        return False
+    if copy.is_file() and copy.stat().st_mtime >= video.stat().st_mtime:
+        return True
+    temporary = directory / "video-30.tmp.mp4"
+    subprocess.run(["nice", "-n", "10", "ffmpeg", "-nostdin", "-y", "-i", str(video), "-an", "-vf", "fps=30",
+                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+                    str(temporary)], check=True, capture_output=True)
+    temporary.replace(copy)
+    return True
 
 if __name__ == "__main__":
     print(json.dumps(search(" ".join(sys.argv[1:]) or "bohemian rhapsody"), ensure_ascii=False, indent=2))

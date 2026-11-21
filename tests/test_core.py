@@ -403,6 +403,22 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         del state.clients['a']
         self.assertEqual(state.snapshot()['phones'], 1)
 
+    def test_sixty_fps_videos_get_a_thirty_fps_copy(self):
+        # karaoke-server: the original stays; only >30 fps videos get video-30.mp4.
+        import subprocess
+        from ktvibes import youtube
+        with tempfile.TemporaryDirectory() as folder:
+            d = Path(folder)
+            for fps, name in ((60, 'a'), (30, 'b')):
+                (d / name).mkdir()
+                subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', f'testsrc=size=320x180:rate={fps}', '-t', '2',
+                                '-c:v', 'libx264', '-pix_fmt', 'yuv420p', str(d / name / 'video.mp4')], check=True)
+            self.assertTrue(youtube.make_30fps(d / 'a'))
+            self.assertAlmostEqual(youtube.video_fps(d / 'a' / 'video-30.mp4'), 30, delta=0.5)
+            self.assertAlmostEqual(youtube.video_fps(d / 'a' / 'video.mp4'), 60, delta=0.5)   # original untouched
+            self.assertFalse(youtube.make_30fps(d / 'b'))
+            self.assertFalse((d / 'b' / 'video-30.mp4').exists())
+
     def test_singer_names_are_unique_per_phone_until_idle(self):
         state = State()
         self.assertEqual(state.claim_singer('  Anna ', 'phone-1'), 'Anna')

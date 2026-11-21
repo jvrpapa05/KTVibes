@@ -246,10 +246,10 @@ async def claim_singer(singer: Singer):
 @app.get("/media/{video_id}/{filename}")
 async def media(video_id: str, filename: str):
     """Stems are requested by name (vocals, no_vocals) and served in whichever format is cached."""
-    if not youtube.ID.fullmatch(video_id) or filename not in (*stems.NAMES, "video.mp4"):
+    if not youtube.ID.fullmatch(video_id) or filename not in (*stems.NAMES, "video.mp4", "video-30.mp4"):
         raise HTTPException(404)
     folder = CACHE / video_id
-    path = folder / filename if filename == "video.mp4" else stems.path(folder, filename)
+    path = folder / filename if filename.endswith(".mp4") else stems.path(folder, filename)  # karaoke-server: + video-30.mp4
     if not path or not path.is_file():
         raise HTTPException(404)
     types = {".mp4": "video/mp4", ".opus": "audio/ogg", ".flac": "audio/flac", ".wav": "audio/wav"}
