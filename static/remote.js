@@ -552,9 +552,33 @@ $('photo-open').onclick=()=>{if(!singer())return askName();$('photo-input').valu
 // Several photos can be picked at once: they go one by one, spaced to the server's per-phone photo cooldown, and
 // pile up on the TV. At most PHOTO_BATCH per pick, the number the TV shows at once.
 const PHOTO_BATCH=6,PHOTO_GAP=3200;
+// karaoke-server: the date the photo was taken, for the polaroid. Read from the JPEG's EXIF (DateTimeOriginal,
+// else DateTime) before shrinking, which strips all EXIF; only this date is sent, never GPS or camera details.
+// No EXIF (screenshots, PNG, HEIC): the file's date, else today.
+async function photoDate(file){
+ try{
+  const v=new DataView(await file.slice(0,262144).arrayBuffer());
+  if(v.getUint16(0)===0xFFD8){
+   for(let o=2;o+10<v.byteLength;){
+    const marker=v.getUint16(o),len=v.getUint16(o+2);
+    if(marker===0xFFE1&&v.getUint32(o+4)===0x45786966){
+     const t=o+10,le=v.getUint16(t)===0x4949,u16=p=>v.getUint16(p,le),u32=p=>v.getUint32(p,le);
+     const find=(ifd,tags)=>{const n=u16(t+ifd);for(let i=0;i<n;i++){const e=t+ifd+2+i*12;if(tags.includes(u16(e)))return u32(e+8);}return null;};
+     const text=off=>{let s='';for(let i=0;i<19;i++){const c=v.getUint8(t+off+i);if(!c)break;s+=String.fromCharCode(c);}return s;};
+     const ifd0=u32(t+4),exif=find(ifd0,[0x8769]);let at=exif!=null?find(exif,[0x9003,0x9004]):null;if(at==null)at=find(ifd0,[0x0132]);
+     const m=at!=null&&text(at).match(/^(\d{4}):(\d{2}):(\d{2})/);
+     if(m&&m[1]!=='0000')return `${m[1]}-${m[2]}-${m[3]}`;
+     break;
+    }
+    if((marker&0xFF00)!==0xFF00||!len)break;o+=2+len;
+   }
+  }
+ }catch{}
+ const d=new Date(file.lastModified||Date.now());return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 async function sendPhoto(file){
- const blob=await shrinkPhoto(file);
- const r=await fetch('/api/photo',{method:'POST',headers:{'Content-Type':'image/jpeg','X-Singer':encodeURIComponent(singer()),'X-Device':deviceId()},body:blob});
+ const taken=await photoDate(file),blob=await shrinkPhoto(file);
+ const r=await fetch('/api/photo',{method:'POST',headers:{'Content-Type':'image/jpeg','X-Singer':encodeURIComponent(singer()),'X-Device':deviceId(),'X-Photo-Date':taken},body:blob});
  if(!r.ok){let m=`Couldn't send (${r.status})`;try{m=(await r.json()).detail||m;}catch{}throw new Error(m);}
 }
 // karaoke-server: the Photo button itself shows the progress of a pick ("Sending 2 of 5" over a filling bar)

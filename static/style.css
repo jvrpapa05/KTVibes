@@ -197,3 +197,8 @@ body.still :is(.tv-tools,.tv-bottom,.open-remote){opacity:0;pointer-events:none}
 /* karaoke-server: Up next rows read right-aligned: text, %, then the number at the far right */
 #on-deck .deck-text{text-align:right}
 #on-deck .deck-num{min-width:1.2em;text-align:right;font-weight:700}
+/* karaoke-server: polaroid captions handwritten (Caveat, SIL OFL, static/fonts/Caveat-LICENSE.txt) */
+@font-face{font-family:'Caveat';src:url('/static/fonts/Caveat.woff2') format('woff2');font-weight:400 700;font-display:swap}
+.polaroid figcaption.polaroid-note{display:flex;align-items:baseline;justify-content:space-between;gap:.6em;padding:1vw .4vw 1.7vw;font:600 calc(clamp(20px,1.9vw,36px)*var(--ui,1))/1.05 'Caveat','Segoe Print','Bradley Hand',cursive;color:#23306b;text-align:left;transform:rotate(-1.2deg)}
+.polaroid .pn-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.polaroid .pn-date{flex:none;font-size:.78em;font-weight:500;color:#3b4a8f}

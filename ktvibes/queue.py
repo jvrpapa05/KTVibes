@@ -350,7 +350,7 @@ class State:
         await asyncio.gather(*(self.send(ws, notice) for ws, role in list(self.clients.items()) if role != "tv"))
         return item
 
-    async def add_photo(self, data, kind, singer, device):
+    async def add_photo(self, data, kind, singer, device, taken=""):
         name = self.sender_name(singer, device)
         if len(data) > PHOTO_MAX_BYTES:
             raise ValueError("That photo is too big")
@@ -361,7 +361,7 @@ class State:
             self.photos.pop(next(iter(self.photos)))
         photo_id = uuid.uuid4().hex
         self.photos[photo_id] = {"data": data, "type": kind, "name": name, "at": now}
-        return await self.show_fun("photo", name, photo=photo_id)
+        return await self.show_fun("photo", name, photo=photo_id, date=taken)
 
     async def control(self, message, sender=None):
         action = message.get("action")

@@ -273,6 +273,16 @@ async def config():
 
 PHOTO_TYPES = {b"\xff\xd8\xff": "image/jpeg", b"\x89PNG": "image/png", b"RIFF": "image/webp"}
 
+def photo_date(value: str) -> str:
+    """karaoke-server: the date a photo was taken (YYYY-MM-DD, sent by the phone from its EXIF) for the polaroid;
+    anything that isn't a real date between 1990 and tomorrow is dropped."""
+    import datetime
+    try:
+        day = datetime.date.fromisoformat(value.strip()[:10])
+    except ValueError:
+        return ""
+    return day.isoformat() if datetime.date(1990, 1, 1) <= day <= datetime.date.today() + datetime.timedelta(days=1) else ""
+
 @app.post("/api/photo", status_code=201)
 async def photo_upload(request: Request):
     """karaoke-server: a phone sends a (shrunk) photo; it pops up on the TV as a polaroid with the sender's name.
@@ -282,7 +292,8 @@ async def photo_upload(request: Request):
     if kind is None:
         raise HTTPException(415, "Send a JPEG, PNG or WebP photo")
     try:
-        item = await state.add_photo(data, kind, unquote(request.headers.get("x-singer", "")), request.headers.get("x-device", ""))
+        item = await state.add_photo(data, kind, unquote(request.headers.get("x-singer", "")), request.headers.get("x-device", ""),
+                                     photo_date(request.headers.get("x-photo-date", "")))
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     return {"id": item["id"]}

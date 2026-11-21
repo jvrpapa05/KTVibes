@@ -530,7 +530,10 @@ function showPhoto(e){
  card.style.setProperty('--tilt',`${(Math.random()*30-15).toFixed(1)}deg`);
  card.style.setProperty('--from-x',`${((Math.random()<.5?-1:1)*(25+Math.random()*35)).toFixed(0)}vw`);
  card.style.setProperty('--spin',`${(Math.random()*120-60).toFixed(0)}deg`);
- card.append(image,el('figcaption',`📷 ${e.name}`));
+ // karaoke-server: written on the strip like a real polaroid: the name, then the date it was taken.
+ const caption=el('figcaption',undefined,'polaroid-note');caption.append(el('span',e.name,'pn-name'));
+ if(e.date){const day=new Date(`${e.date}T12:00:00`);if(!isNaN(day))caption.append(el('span',day.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}),'pn-date'));}
+ card.append(image,caption);
  image.onload=()=>{
   document.body.append(card);
   const pile=[...document.querySelectorAll('.polaroid:not(.out)')];
