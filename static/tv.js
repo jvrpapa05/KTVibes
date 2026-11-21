@@ -626,4 +626,5 @@ setInterval(()=>{
  const at=music.currentTime;video.src=`/media/${w.id}/video-30.mp4`;video.load();
  video.addEventListener('loadedmetadata',()=>{video.currentTime=music.currentTime||at;},{once:true});
  console.info(`60 fps video dropped ${Math.round(100*dropped/total)}% of frames: switched to the 30 fps copy`);
+ send({action:'tv_event',value:{kind:'fps_fallback',song:w.id,dropped_pct:Math.round(100*dropped/total)}});
 },1000);

@@ -2,10 +2,11 @@ import asyncio
 import hashlib
 import json
 import logging
+import sys
 import time
 from pathlib import Path
 import soundfile as sf
-from . import align, guides, songbook, stems, youtube, lyrics
+from . import align, guides, songbook, stems, youtube, lyrics, metrics
 
 log = logging.getLogger(__name__)
 TIMING_VERSION = 10  # bump when alignment or guide output changes, so cached timing is rebuilt
@@ -142,6 +143,7 @@ async def prefetch(state, cache: Path):
                     break
             except Exception:
                 log.warning("Prefetch failed for %s; it will be downloaded when its turn comes", item["id"], exc_info=True)
+                metrics.record("prefetch_failed", song=item["id"], error=str(sys.exc_info()[1])[-300:])
 
 async def run(state, cache: Path):
     while True:
@@ -151,6 +153,7 @@ async def run(state, cache: Path):
             await state.wake.wait()
             continue
         folder = cache / item["id"]
+        timing, separated = {}, False  # karaoke-server: for the song_prepared metric
         def check():
             # A removed song stops holding up the queue; a download already running finishes on its own.
             if item is not state.current and item not in state.upcoming:
@@ -186,12 +189,15 @@ async def run(state, cache: Path):
                     if not (folder / "audio.m4a").is_file():
                         item["status"], item["step"], item["progress"] = "downloading", "audio", 0.0
                         await state.broadcast()
+                        t_download = time.monotonic()
                         meta.update(await asyncio.to_thread(youtube.download, item["id"], folder, reporter(state, item, "audio")))
+                        timing["download_s"] = round(time.monotonic() - t_download, 1)
                         check()
                     item["status"], item["step"], item["progress"] = "separating", None, None
                     expect_step(item, "separating", meta.get("duration"))
                     await state.broadcast()
                     meta["separation_seconds"], gain = await asyncio.to_thread(separate, folder / "audio.m4a", folder)
+                    separated = True
                     learn_step("separating", meta["separation_seconds"], meta.get("duration"))
                 meta["stem_gain"] = gain
                 save_meta(folder, meta)  # the gain must survive even if a later step fails
@@ -258,6 +264,19 @@ async def run(state, cache: Path):
             check()
             learn_step("syncing", time.monotonic() - syncing_from, item["duration"])
             item["status"], item["step"], item["progress"] = "ready", None, None
+            # karaoke-server: how long this song took to get ready, and what came out of it
+            try:
+                timed = json.loads((folder / "timed.json").read_text()) if (folder / "timed.json").is_file() else {}
+            except (OSError, ValueError):
+                timed = {}
+            video_file = folder / "video.mp4"
+            metrics.record("song_prepared", song=item["id"], title=item["title"], artist=item["artist"], singer=item.get("singer", ""),
+                           duration=round(item.get("duration") or 0), waited_s=round(time.time() - item.get("added", time.time()), 1),
+                           syncing_s=round(time.monotonic() - syncing_from, 1), separated=separated,
+                           separation_s=round(meta.get("separation_seconds") or 0, 1) if separated else 0, **timing,
+                           lyrics_lines=len(item.get("lyrics") or []), aligned=timed.get("aligned"),
+                           video=item.get("video", False), video_fps=round(youtube.video_fps(video_file)) if video_file.is_file() else 0,
+                           video_30=item.get("video_30", False), video_warning=item.get("video_warning", ""))
             item.pop("since", None); item.pop("expect", None)
             state.promote()
         except Removed:
@@ -270,5 +289,6 @@ async def run(state, cache: Path):
             missing = missing_tools()
             # A missing ffmpeg or Node.js surfaces as an obscure "WinError 2"; say what to fix instead.
             item["error"] = f"{' and '.join(missing)} not found. Install, open a new terminal, restart KTVibes, then Retry." if missing else youtube.explain(exc)
+            metrics.record("prep_error", song=item["id"], title=item["title"], error=str(exc)[-300:], bot_check=bool(youtube.BOT_CHECK.search(str(exc))))
             state.promote()
         await state.broadcast()

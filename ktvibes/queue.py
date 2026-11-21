@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import time
 import uuid
-from . import songbook
+from . import songbook, metrics
 
 DISPLAY = {"video_mode": ("show", "blur", "hide"), "lyric_mode": ("two", "scroll", "off"), "theme": ("default",)}  # karaoke-server: Classic theme removed (English-only users)
 def following(options, current):
@@ -225,7 +225,7 @@ class State:
 
     @staticmethod
     def entry(video_id, artist, title, singer=""):
-        return {"key": uuid.uuid4().hex, "id": video_id, "artist": artist, "title": title, "singer": singer,
+        return {"key": uuid.uuid4().hex, "id": video_id, "artist": artist, "title": title, "singer": singer, "added": time.time(),
                 "status": "queued", "lyrics": [], "duration": 0, "error": None}
 
     def apply_profile(self):
@@ -344,6 +344,7 @@ class State:
     async def show_fun(self, kind, name, **extra):
         """Pop a shout-out or photo up on the TV, and let every remote offer to hide it."""
         item = {"type": kind, "id": uuid.uuid4().hex[:12], "name": name, **extra}
+        metrics.record(kind, singer=name, chars=len(extra.get("text", "")) if kind == "shout" else None)  # never the text itself
         if self.player is not None:
             await self.send(self.player, item)
         notice = {"type": "fun", "kind": kind, "id": item["id"], "name": name}
@@ -361,6 +362,7 @@ class State:
             self.photos.pop(next(iter(self.photos)))
         photo_id = uuid.uuid4().hex
         self.photos[photo_id] = {"data": data, "type": kind, "name": name, "at": now}
+        metrics.record("photo_upload", singer=name, bytes=len(data), has_date=bool(taken))  # never the photo itself
         return await self.show_fun("photo", name, photo=photo_id, date=taken)
 
     async def control(self, message, sender=None):
@@ -372,6 +374,13 @@ class State:
             if sender is self.player and isinstance(value, dict):
                 keep = {k: value[k] for k in ("song", "height", "dropped", "frames", "waits", "jumps", "max_drift", "agent") if k in value}
                 logging.getLogger("uvicorn.error").info("TV playback %s", json.dumps(keep, ensure_ascii=False)[:600])
+                metrics.record("tv_playback", **keep)
+            return
+        if action == "tv_event":
+            # karaoke-server: things the TV decides by itself (e.g. switching a 60 fps video to its 30 fps copy)
+            value = message.get("value")
+            if sender is self.player and isinstance(value, dict):
+                metrics.record("tv_" + str(value.get("kind", "event"))[:30], **{k: v for k, v in value.items() if k != "kind" and isinstance(v, (int, float, str, bool))})
             return
         if action == "shout":
             name = self.sender_name(message.get("singer"), message.get("device"))
@@ -403,6 +412,7 @@ class State:
                 raise ValueError("Unknown reaction")
             if self.player is not None:
                 await self.send(self.player, {"type": "react", "value": message["value"]})
+            metrics.record("cheer", emoji=message["value"], custom=message["value"] not in REACTIONS)
             return
         if action == "dial":
             # Keypad digits go straight to the TV to show and read out; nothing changes.
@@ -431,6 +441,10 @@ class State:
         elif action == "pause":
             self.playing = False
         elif action == "skip" or action == "ended":
+            if self.current:  # karaoke-server metric: finished or skipped, and how far in
+                metrics.record("song_played", song=self.current["id"], title=self.current["title"], singer=self.current.get("singer", ""),
+                               completed=action == "ended", position=round(self.position), duration=round(self.current.get("duration") or 0),
+                               speed=self.speed, key=self.key, vocal=round(self.vocal, 2))
             self.advance(scored=action == "ended")
         elif action == "undo":
             self.take_back()

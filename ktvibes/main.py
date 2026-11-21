@@ -6,6 +6,7 @@ import os
 import shutil
 from pathlib import Path
 import socket
+import time
 import math
 from urllib.parse import unquote  # karaoke-server: singer names in photo headers are URL-encoded
 import qrcode
@@ -15,6 +16,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from .queue import State, VERSION
+from . import metrics  # karaoke-server: local usage/health metrics (cache/metrics.jsonl)
 from . import lyrics, songbook, stems, worker, youtube
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -30,13 +32,26 @@ async def lifespan(app):
     state.restore(CACHE / "queue.json", seed=lambda: {id: meta["prepared"] for id, meta in prepared_songs().items()})
     task = asyncio.create_task(worker.run(state, CACHE))
     ahead = asyncio.create_task(worker.prefetch(state, CACHE))  # karaoke-server: download the next songs early
+    metrics.setup(CACHE, VERSION)
+    metrics.record("server_start", songs=len(prepared_songs()))
+    room = asyncio.create_task(room_snapshots())
     try:
         yield
     finally:
-        for running in (task, ahead):
+        metrics.record("server_stop")
+        for running in (task, ahead, room):
             running.cancel()
             with suppress(asyncio.CancelledError):
                 await running
+
+async def room_snapshots():
+    """karaoke-server metric: every 5 minutes, how busy the room is."""
+    while True:
+        await asyncio.sleep(300)
+        now = time.time()
+        metrics.record("room", phones=sum(r == "remote" for r in state.clients.values()), tv=state.player is not None,
+                       sound=state.audio, queue=len(state.upcoming), playing=(state.current or {}).get("id"),
+                       singers_active=sum(now - s.get("seen", 0) < 3600 for s in state.singers.values()))
 
 def build() -> str:
     """Fingerprint of the files the pages load. A TV left open across an update reloads itself
@@ -86,7 +101,9 @@ async def search(q: str = Query(min_length=1, max_length=200), page: int = Query
     try:
         results = await asyncio.to_thread(youtube.search, q, page)
     except Exception as exc:
+        metrics.record("search_failed", q=q, page=page, error=str(exc)[-200:], bot_check=bool(youtube.BOT_CHECK.search(str(exc))))
         raise HTTPException(502, f"YouTube search failed: {youtube.explain(exc)}") from exc
+    metrics.record("search", q=q, page=page, results=len(results), kinds=[r.get("kind") for r in results])
     # Prepared songs start right away; the remote marks them.
     cached = prepared_songs()
     return [{**result, "cached": result["id"] in cached} for result in results]
@@ -96,6 +113,8 @@ class Song(BaseModel):
     artist: str = Field(min_length=1, max_length=200)
     title: str = Field(min_length=1, max_length=300)
     singer: str = Field(default="", max_length=40)  # karaoke-server: who sings it, typed once on the remote
+    rank: int | None = Field(default=None, ge=0, le=200)  # karaoke-server metric: position in the search results it came from
+    kind: str = Field(default="", max_length=20)  # karaoke-server metric: that result's kind (official, lyric, ...)
     device: str = Field(default="", max_length=64)  # karaoke-server: the remote's random id; names are unique per phone
 
     @field_validator("singer")
@@ -164,6 +183,7 @@ async def lyric_options(video_id: str, q: str = Query("", max_length=200)):
                        lyrics.candidates(meta["artist"], meta["title"], meta["duration"], (meta.get("source_title") or "",), exhaustive=True))
     except Exception as exc:
         raise HTTPException(502, f"Lyrics lookup failed: {exc}") from exc
+    metrics.record("lyrics_picker", song=video_id, searched=bool(q.strip()), versions=len(found))
     options = []
     for c in found:
         raw = c.get("syncedLyrics") or ""
@@ -181,6 +201,7 @@ class LyricChoice(BaseModel):
 async def choose_lyrics(video_id: str, choice: LyricChoice):
     """Save the chosen version; the song on stage switches to it at once."""
     folder, meta = song_meta(video_id)
+    started = time.monotonic()
     try:
         chosen = await lyrics.record(choice.id)
     except Exception as exc:
@@ -201,6 +222,8 @@ async def choose_lyrics(video_id: str, choice: LyricChoice):
     meta["lyrics_identity"] = [meta["artist"], meta["title"]]
     meta.pop("lyric_offset", None)  # a nudge for other lyrics no longer fits
     worker.save_meta(folder, meta)
+    metrics.record("lyrics_chosen", song=video_id, version=choice.id, playing=bool(state.current and state.current["id"] == video_id),
+                   seconds=round(time.monotonic() - started, 1))
     return {"saved": choice.id}
 
 @app.delete("/api/songs/{video_id}")
@@ -225,7 +248,10 @@ async def enqueue(song: Song):
         raise HTTPException(409, "Queue is full")
     try:
         singer = state.claim_singer(song.singer, song.device) if song.singer else ""
-        return await state.add(song.id, song.artist, song.title, singer)
+        item = await state.add(song.id, song.artist, song.title, singer)
+        metrics.record("queue_add", song=song.id, title=song.title, artist=song.artist, singer=singer, rank=song.rank,
+                       kind=song.kind, from_search=song.rank is not None, queue=len(state.upcoming), cached=song.id in prepared_songs())
+        return item
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -325,6 +351,7 @@ async def websocket(ws: WebSocket):
     state.clients[ws] = role
     if role == "tv":
         state.player = ws
+        metrics.record("tv_connect", client=ws.client.host if ws.client else "")
     await state.broadcast()
     try:
         while True:
@@ -342,6 +369,8 @@ async def websocket(ws: WebSocket):
     except (WebSocketDisconnect, RuntimeError):
         pass
     finally:
+        if role == "tv":
+            metrics.record("tv_disconnect", client=ws.client.host if ws.client else "", was_player=state.player is ws)
         state.disconnect(ws)
         await state.broadcast()
 
@@ -372,4 +401,10 @@ def run():
         # Common right after installing: the terminal predates the install and has a stale PATH.
         print(f"WARNING: {', '.join(missing)} not found on PATH. Songs can't be prepared until it is installed.\n"
               "If you just installed it, open a new terminal and run ktvibes again.", flush=True)
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+    # karaoke-server: clean, quick stops. Open TV/phone sockets never close by themselves, so uvicorn waited until
+    # systemd killed it ("Failed with result 'timeout'" on every restart). Give them 3 s, save the queue, then exit
+    # without waiting for a song mid-separation in a worker thread (it is prepared again on the next start).
+    uvicorn.run(app, host="0.0.0.0", port=PORT, timeout_graceful_shutdown=3)
+    state.save()
+    sys.stdout.flush(); sys.stderr.flush()
+    os._exit(0)

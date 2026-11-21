@@ -303,7 +303,7 @@ async function loadRecent(){
 }
 // Search in pages of 10; "More results" appends the next page.
 let search={query:'',page:0,seen:new Set()},searchRun=0;
-const enqueue=song=>api('/api/queue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:song.id,artist:song.artist,title:song.title,singer:singer(),device:deviceId()})});
+const enqueue=song=>api('/api/queue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:song.id,artist:song.artist,title:song.title,singer:singer(),device:deviceId(),...(song.rank!=null?{rank:song.rank,kind:song.kind||''}:{})})});  // rank/kind: metrics
 // Result button states: add, added, failed.
 const ICONS={add:'<path d="M12 5v14M5 12h14"/>',added:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',failed:'<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/>'};
 function icon(node,name){node.className=`result-icon ${name}`;node.innerHTML=`<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;}
@@ -321,7 +321,7 @@ function showResult(song,list=$('results'),wrap=row=>row,index=-1){
   // A swipe ends in a click; an open row closes on tap instead of queueing.
   if(b.dataset.dragged){delete b.dataset.dragged;return;}if(b.parentElement?.classList.contains('open')){closeSwipe();return;}
   b.disabled=true;
-  try{const added=await enqueue({id:song.id,...song.parsed});icon(status,'added');mark('added',el('em','예약됨'),' · added');haptic([10,40,10]);flyToQueue(image);toast(`Added ${song.parsed.title}`);
+  try{const rank=list===$('results')?[...list.querySelectorAll('.result')].indexOf(b):null;const added=await enqueue({id:song.id,...song.parsed,rank:rank>=0?rank:null,kind:song.kind});icon(status,'added');mark('added',el('em','예약됨'),' · added');haptic([10,40,10]);flyToQueue(image);toast(`Added ${song.parsed.title}`);
    if(list===$('results'))setTimeout(()=>leaveSearch(added?.key),450);}
   catch(error){icon(status,'failed');mark('failed',"Couldn't add. Try again");toast(error.message,undefined,'err');}finally{b.disabled=false;}
  };

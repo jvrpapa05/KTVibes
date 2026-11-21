@@ -419,6 +419,36 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
             self.assertFalse(youtube.make_30fps(d / 'b'))
             self.assertFalse((d / 'b' / 'video-30.mp4').exists())
 
+    async def test_metrics_record_plays_cheers_and_fun_without_private_text(self):
+        # karaoke-server: local metrics in <cache>/metrics.jsonl; shout-out text is never stored.
+        from ktvibes import metrics
+        with tempfile.TemporaryDirectory() as folder:
+            metrics.setup(Path(folder), '9.9.9')
+            state = State(); state.claim_singer('Vince', 'phone-v')
+            async def fake_send(ws, message): return True
+            state.send = fake_send; state.player = object()
+            (await state.add('aaaaaaaaaaa', 'A', 'First', 'Vince'))['status'] = 'ready'
+            state.promote(); state.position = 42
+            await state.control({'action': 'skip'})
+            await state.control({'action': 'react', 'value': '🦄'})
+            await state.control({'action': 'shout', 'value': 'my secret message', 'singer': 'Vince', 'device': 'phone-v'})
+            rows = [json.loads(l) for l in (Path(folder) / 'metrics.jsonl').read_text().splitlines()]
+            played = next(r for r in rows if r['event'] == 'song_played')
+            self.assertEqual((played['song'], played['completed'], played['position'], played['v']), ('aaaaaaaaaaa', False, 42, '9.9.9'))
+            self.assertEqual(next(r for r in rows if r['event'] == 'cheer')['custom'], True)
+            self.assertEqual(next(r for r in rows if r['event'] == 'shout')['chars'], len('my secret message'))
+            self.assertNotIn('secret', (Path(folder) / 'metrics.jsonl').read_text())
+            old = metrics.METRICS_MAX_BYTES
+            try:
+                metrics.METRICS_MAX_BYTES = 10
+                metrics.record('after_rotation')
+                self.assertTrue((Path(folder) / 'metrics.jsonl.1').exists())
+            finally:
+                metrics.METRICS_MAX_BYTES = old
+            metrics.setup(Path(folder) / 'missing' / 'dir', 'x')
+            metrics.record('cannot_write')  # must not raise
+            metrics._path = None
+
     def test_singer_names_are_unique_per_phone_until_idle(self):
         state = State()
         self.assertEqual(state.claim_singer('  Anna ', 'phone-1'), 'Anna')
