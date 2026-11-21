@@ -322,8 +322,6 @@ function showResult(song,list=$('results'),wrap=row=>row,index=-1){
  const image=el('img');image.src=song.thumbnail;image.alt='';const info=el('div');const title=el('strong',song.title);if(song.cached)title.append(el('span','READY','tag'));const note=el('small',undefined,'result-note classic-only');const meta=el('small',`${song.channel} · ${clock(song.duration)}`);
  // karaoke-server: what kind of upload it is (results come official videos first)
  if(KIND_LABEL[song.kind])meta.prepend(el('span',KIND_LABEL[song.kind],`kind kind-${song.kind}`),' ');
- // karaoke-server: synced lyrics exist for this exact length, so they'll line up (these results come first)
- if(song.lyrics_match)meta.prepend(el('span','✓ Lyrics','kind kind-lyrics'),' ');
  info.append(title,meta,note);const status=el('span');icon(status,'add');b.append(image,info,status);
  // Classic swaps the channel line for what happened to the add.
  const mark=(name,...text)=>{b.classList.remove('added','failed');b.classList.add(name);note.replaceChildren(...text);};
@@ -480,10 +478,14 @@ async function loadPage(){
   const results=(await api(`/api/search?q=${encodeURIComponent(search.query)}&page=${search.page}`)).filter(s=>!search.seen.has(s.id));
   if(run!==searchRun)return;
   if(first)$('results').replaceChildren();
+  // karaoke-server: every version listed has lyrics that line up with it (only those come back)
+  if(first&&results.length)$('results').append(el('p','✓ Every version here has lyrics that line up','playable-note'));
   results.forEach((s,i)=>{search.seen.add(s.id);showResult(s,$('results'),row=>row,i);});
-  $('more').hidden=results.length===0||search.page>=9;$('results').dataset.state=search.seen.size?'':'none';
+  // karaoke-server: only playable versions come back, so an empty page doesn't mean the next one is empty too
+  $('more').hidden=search.page>=9;$('results').dataset.state=search.seen.size?'':'none';
   $('results-end').hidden=!$('more').hidden||!search.seen.size;
-  if(!search.seen.size)$('results').append(emptyNote('없음','검색 결과가 없어요','No songs found. Try the title in its original language, or just the artist.'));
+  if(!search.seen.size&&!$('results').querySelector('.empty'))$('results').append(emptyNote('없음','검색 결과가 없어요','No karaoke-ready version yet. Only versions whose lyrics line up are shown: add the artist, check the spelling, or tap More results.'));
+  if(search.seen.size)$('results').querySelector('.empty')?.remove();
   if(first)showResults();
  }catch(error){if(run!==searchRun)return;if(first){$('results').replaceChildren();$('results').dataset.state='';}toast(error.message,undefined,'err');}finally{$('more').disabled=false;}
 }

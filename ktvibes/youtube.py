@@ -103,14 +103,24 @@ def song_name(title: str) -> str:
     title = re.split(r"\s+(?:ft\.?|feat\.?|featuring|with)\s|[(\[]|\s-\s", (title or "").casefold())[0]
     return re.sub(r"\W+", "", title)
 
-def mark_lyrics(results: list[dict], records: list[tuple[str, float]], tolerance: float = LYRICS_TOLERANCE) -> None:
-    """Flag results with synced lyrics of the same song and length (records: (song_name, seconds) from LRCLIB)."""
+def record_song(track: str, artist: str) -> str:
+    """The song a record is for, also when it was uploaded with a video's title: "Lady Gaga - Telephone (Official…)"."""
+    left, dash, right = (track or "").partition(" - ")
+    if dash and lead_artist(left) and lead_artist(left) == lead_artist(artist):
+        track = right
+    return song_name(track)
+
+def mark_lyrics(results: list[dict], records: list[tuple], tolerance: float = LYRICS_TOLERANCE) -> None:
+    """Flag results with synced lyrics of the same song, artist and length.
+    records: (song_name, seconds, lead_artist) from LRCLIB (lead_artist optional)."""
     for r in results:
         name = song_name((r.get("parsed") or {}).get("title", "")) or song_name(r.get("title", ""))
         whole = re.sub(r"\W+", "", (r.get("title") or "").casefold())
-        # the song's name, or (for titles like "Adele   Hello" that don't split) found inside the title
-        same = lambda track: track == name or (len(track) >= 4 and track in whole)
-        diffs = [abs((r.get("duration") or 0) - seconds) for track, seconds in records if track and same(track)]
+        text = whole + re.sub(r"\W+", "", f"{r.get('channel') or ''}{(r.get('parsed') or {}).get('artist', '')}".casefold())
+        # the song's name, or (for titles like "Adele   Hello" that don't split) found inside the title; and the
+        # record's artist in the title, channel or names (a flashmob of "Bohemian Rhapsody" is not Queen's)
+        same = lambda track, artist: (track == name or (len(track) >= 4 and track in whole)) and (not artist or artist in text)
+        diffs = [abs((r.get("duration") or 0) - rec[1]) for rec in records if rec[0] and same(rec[0], rec[2] if len(rec) > 2 else "")]
         best = min(diffs, default=None)
         # a cover or live version can be as long as the record and still be sung differently: never "matching"
         r["lyrics_match"] = best is not None and best <= tolerance and bool(r.get("duration")) and r.get("kind") not in ("cover", "live")
@@ -175,7 +185,7 @@ def names_from_records(results: list[dict], records: list[dict]) -> None:
         if best:
             r["parsed"] = {"artist": best[1]["artistName"], "title": best[1]["trackName"], "guessed": parsed}
 
-def order_results(results: list[dict]) -> list[dict]:
+def order_results(results: list[dict], query: str = "") -> list[dict]:
     """Group by kind (official first), keeping YouTube's order within each kind. karaoke-server: when one song has
     several official videos, the shortest comes first. Long cuts often have a story intro or skits that throw the
     lyrics off (user, 2026-11-21). Different songs keep YouTube's relevance order."""
@@ -187,15 +197,19 @@ def order_results(results: list[dict]) -> list[dict]:
     first = {}
     for i, r in enumerate(results):
         first.setdefault(song(r), i)
+    wanted = re.sub(r"\W+", "", (query or "").casefold())
     def key(r):
         # karaoke-server: results whose length matches synced lyrics first (official ones first, then lyric videos...),
         # then the rest as before (covers and live versions are never marked as matching: see mark_lyrics)
         kind = r.get("kind", "other")
+        # karaoke-server: the song that was asked for first ("Why lany": LANY's "Why" before LANY's "you!")
+        name = song_name((r.get("parsed") or {}).get("title", ""))
+        asked = 0 if wanted and len(name) >= 2 and name in wanted else 1
         if r.get("lyrics_match"):
-            return (0, KIND_ORDER[kind], r.get("lyrics_diff", 0), 0)
+            return (asked, 0, KIND_ORDER[kind], r.get("lyrics_diff", 0), 0)
         if kind != "official":
-            return (1, KIND_ORDER[kind], 0, 0)
-        return (1, 0, first[song(r)], r.get("duration") or float("inf"))
+            return (asked, 1, KIND_ORDER[kind], 0, 0)
+        return (asked, 1, 0, first[song(r)], r.get("duration") or float("inf"))
     return sorted(results, key=key)
 
 def _extract(options: dict, video_id: str, progress=None, attempts: int = 4) -> dict:

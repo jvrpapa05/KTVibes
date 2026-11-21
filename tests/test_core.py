@@ -542,6 +542,9 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         self.assertEqual([x["id"] for x in order_results(results)], ["edit", "lyric", "story", "other", "live"])
         self.assertEqual(song_name("Bad Blood (Taylor's Version) - From The Vault ft. Kendrick"), "badblood")
         self.assertFalse(next(x for x in results if x["id"] == "live")["lyrics_match"])  # same length, still live
+        from ktvibes.youtube import record_song
+        self.assertEqual(record_song("Lady Gaga - Telephone ft. Beyoncé (Official Music Video)", "Lady Gaga"), "telephone")
+        self.assertEqual(record_song("Bad - Day", "Daniel Powter"), "bad")   # a song that has " - " in it stays
         mark_lyrics(results, [])  # LRCLIB down: the order is as before
         self.assertEqual([x["id"] for x in order_results(results)][:2], ["edit", "story"])
 

@@ -213,11 +213,30 @@ class APITests(unittest.TestCase):
         (folder / 'meta.json').write_text('{"artist": "Joji", "title": "Glimpse of Us"}', encoding='utf-8')
         (folder / 'no_vocals.wav').touch()
         (folder / 'vocals.wav').touch()
-        results = [{'id': 'aaaaaaaaaaa'}, {'id': 'bbbbbbbbbbb'}]
+        # karaoke-server: only playable results are listed, so both have confirmed lyrics here
+        results = [{'id': 'aaaaaaaaaaa', 'lyrics_match': True}, {'id': 'bbbbbbbbbbb', 'lyrics_match': True}]
         with patch.object(self.main.youtube, 'search', return_value=results), \
-             patch.object(self.main, 'lyric_records', AsyncMock(return_value=[])):  # karaoke-server: no LRCLIB call
+             patch.object(self.main, 'lyric_records', AsyncMock(return_value=[])), \
+             patch.object(self.main, 'check_lyrics', lambda found, records: None):
             found = self.client.get('/api/search', params={'q': 'joji'}).json()
         self.assertEqual([r['cached'] for r in found], [True, False])
+
+    def test_search_lists_only_playable_versions(self):
+        # karaoke-server (user, 2026-11-22): "Show a list that is indeed playable"
+        ready = Path(self.temp.name) / 'ccccccccccc'
+        ready.mkdir()
+        (ready / 'meta.json').write_text('{"artist": "LANY", "title": "Soft"}', encoding='utf-8')
+        for name in ('no_vocals.wav', 'vocals.wav', 'timed.json'):
+            (ready / name).touch()
+        song = lambda i, d, title='Soft': {'id': i, 'title': f'LANY - {title}', 'channel': 'LANY', 'duration': d, 'kind': 'official',
+                                           'parsed': {'artist': 'LANY', 'title': title}}
+        results = [song('aaaaaaaaaaa', 178), song('bbbbbbbbbbb', 260), song('ccccccccccc', 999, 'Soft (Live)')]
+        lrc = '[00:10.00]a\n[02:50.00]b'
+        with patch.object(self.main.youtube, 'search', return_value=results), \
+             patch.object(self.main, 'lyric_records', AsyncMock(return_value=[{'id': 1, 'artistName': 'LANY', 'trackName': 'Soft', 'duration': 179, 'syncedLyrics': lrc}])):
+            found = self.client.get('/api/search', params={'q': 'lany soft'}).json()
+        # 178 s matches the 179 s timing; 260 s (a story cut) doesn't; the prepared one with timed lyrics stays
+        self.assertEqual([r['id'] for r in found], ['aaaaaaaaaaa', 'ccccccccccc'])
 
     def test_search_pages(self):
         with patch.object(self.main.youtube, 'search', return_value=[]) as search, \

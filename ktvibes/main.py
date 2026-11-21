@@ -97,14 +97,13 @@ async def suggest(q: str = Query(min_length=1, max_length=200)):
     except Exception:
         return []  # completions are a nicety; never surface their failures
 
-async def lyric_records(q: str) -> list[dict]:
-    """karaoke-server: every LRCLIB record for this search, with its real length for synced ones; [] if slow/down."""
+async def lyric_records(q: str = "", artist: str = "", title: str = "") -> list[dict]:
+    """karaoke-server: every LRCLIB record for this search (or this artist + song); [] if LRCLIB is slow/down."""
+    params = {"artist_name": artist, "track_name": title} if title else {"q": q}
     try:
         async with lyrics.lrclib() as client:
-            response = await asyncio.wait_for(client.get("/api/search", params={"q": q}), 6)
-        records = response.json()
-        lyrics.real_lengths([c for c in records if c.get("syncedLyrics")])
-        return records
+            response = await asyncio.wait_for(client.get("/api/search", params=params), 6)
+        return response.json()
     except Exception:
         logging.getLogger("uvicorn.error").warning("LRCLIB lookup for search %r failed", q, exc_info=True)
         return []
@@ -113,9 +112,19 @@ async def lyric_records(q: str) -> list[dict]:
 async def search(q: str = Query(min_length=1, max_length=200), page: int = Query(0, ge=0, le=9)):
     try:
         found, records = await asyncio.gather(asyncio.to_thread(youtube.search, q, page), lyric_records(q))
-        youtube.names_from_records(found, records)
-        youtube.mark_lyrics(found, [(youtube.song_name(c.get("trackName", "")), c["length"]) for c in records if c.get("length")])
-        results = youtube.order_results(found)
+        check_lyrics(found, records)
+        # A free-text lookup lists ~20 records, so a song can be missed ("Why" has many). Ask about the most likely
+        # unconfirmed versions by artist + song (at most 3, together), then check again.
+        unsure = {}
+        for r in found:
+            p = r.get("parsed") or {}
+            if not r.get("lyrics_match") and r.get("kind") not in ("cover", "live") and p.get("artist") and p.get("title"):
+                unsure.setdefault((youtube.lead_artist(p["artist"]), youtube.song_name(p["title"])), p)
+        if unsure:
+            extra = await asyncio.gather(*(lyric_records(artist=p["artist"], title=p["title"]) for p in list(unsure.values())[:3]))
+            records = list({c.get("id") or id(c): c for c in records + [c for more in extra for c in more]}.values())
+            check_lyrics(found, records)
+        results = youtube.order_results(found, q)
     except Exception as exc:
         metrics.record("search_failed", q=q, page=page, error=str(exc)[-200:], bot_check=bool(youtube.BOT_CHECK.search(str(exc))))
         raise HTTPException(502, f"YouTube search failed: {youtube.explain(exc)}") from exc
@@ -123,7 +132,23 @@ async def search(q: str = Query(min_length=1, max_length=200), page: int = Query
                    lyrics_match=[bool(r.get("lyrics_match")) for r in results], lyric_records=len(records))
     # Prepared songs start right away; the remote marks them.
     cached = prepared_songs()
-    return [{**result, "cached": result["id"] in cached} for result in results]
+    results = [{**result, "cached": result["id"] in cached} for result in results]
+    # karaoke-server: only what can be sung: synced lyrics that match this video, or a prepared song that has them
+    # (user, 2026-11-22: "Show a list that is indeed playable").
+    playable = [r for r in results if r.get("lyrics_match") or (r["cached"] and (CACHE / r["id"] / "timed.json").is_file())]
+    metrics.record("search_playable", q=q, page=page, shown=len(playable), hidden=len(results) - len(playable))
+    return playable
+
+def check_lyrics(found: list[dict], records: list[dict]) -> None:
+    """karaoke-server: clean names and "lyrics match" flags for these results from these LRCLIB records."""
+    synced = [c for c in records if c.get("syncedLyrics")]
+    lyrics.real_lengths(synced)
+    for r in found:
+        if "guessed" in (r.get("parsed") or {}):
+            r["parsed"] = r["parsed"]["guessed"]  # judge again from the title, with the larger set of records
+    youtube.names_from_records(found, records)
+    youtube.mark_lyrics(found, [(youtube.record_song(c.get("trackName", ""), c.get("artistName", "")), c["length"], youtube.lead_artist(c.get("artistName", "")))
+                                for c in synced if c.get("length")])
 
 class Song(BaseModel):
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")
