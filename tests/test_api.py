@@ -242,6 +242,23 @@ class APITests(unittest.TestCase):
         self.assertEqual([r['id'] for r in found], ['ccccccccccc', 'aaaaaaaaaaa'])
         self.assertTrue(found[0]['library'])
 
+    def test_search_asks_again_for_the_official_video(self):
+        # karaoke-server: 5,000-song study (2026-11-22): no official video of the song on the page -> one more search
+        lrc = '[00:05.00]a\n[02:50.00]b'
+        lyric = {'id': 'lyricvid001', 'title': 'Drake - One Dance (Lyrics)', 'channel': 'Lyrics Hub', 'duration': 174, 'kind': 'lyric',
+                 'parsed': {'artist': 'Drake', 'title': 'One Dance'}}
+        mv = {'id': 'officialv01', 'title': 'Drake - One Dance (Official Music Video)', 'channel': 'DrakeVEVO', 'duration': 175,
+              'kind': 'official', 'parsed': {'artist': 'Drake', 'title': 'One Dance'}}
+        pages = {'drake one dance': [lyric], 'drake one dance official music video': [mv, lyric]}
+        with patch.object(self.main.youtube, 'search', side_effect=lambda q, page=0: pages[q]) as search, \
+             patch.object(self.main, 'lyric_records', AsyncMock(return_value=[{'id': 1, 'artistName': 'Drake', 'trackName': 'One Dance', 'duration': 174, 'syncedLyrics': lrc}])):
+            found = self.client.get('/api/search', params={'q': 'drake one dance'}).json()
+            self.assertEqual([r['id'] for r in found], ['officialv01', 'lyricvid001'])
+            pages['drake one dance'] = [mv]   # an official video is already there: no second search
+            search.reset_mock()
+            self.client.get('/api/search', params={'q': 'drake one dance'})
+            self.assertEqual(search.call_count, 1)
+
     def test_library_songs_are_offered_only_when_their_lyrics_line_up(self):
         # karaoke-server: same rule as search results; measured first-line error for prepared songs
         def song(vid, duration, lyrics_duration=None, entry=None, lines=True):

@@ -121,8 +121,19 @@ async def search(q: str = Query(min_length=1, max_length=200), page: int = Query
             p = r.get("parsed") or {}
             if not r.get("lyrics_match") and r.get("kind") not in ("cover", "live") and p.get("artist") and p.get("title"):
                 unsure.setdefault((youtube.lead_artist(p["artist"]), youtube.song_name(p["title"])), p)
-        if unsure:
-            extra = await asyncio.gather(*(lyric_records(artist=p["artist"], title=p["title"]) for p in list(unsure.values())[:3]))
+        # karaoke-server: no official video of the song on the page (5,000-song study, 2026-11-22: 12% of songs, mostly
+        # OPM): YouTube is asked once more for "<search> official music video", meanwhile. That found a playable
+        # official video for ~40% of them ("Drake One Dance", "One Direction Night Changes").
+        more_videos = asyncio.to_thread(youtube.search, f"{q} official music video") if page == 0 and needs_official(found) else None
+        if unsure or more_videos:
+            extra = await asyncio.gather(*(lyric_records(artist=p["artist"], title=p["title"]) for p in list(unsure.values())[:3]),
+                                         *([more_videos] if more_videos else []), return_exceptions=True)
+            if more_videos:
+                page2 = extra.pop()
+                if isinstance(page2, list):
+                    seen = {r["id"] for r in found}
+                    found += [r for r in page2 if r["id"] not in seen]
+            extra = [more for more in extra if isinstance(more, list)]
             records = list({c.get("id") or id(c): c for c in records + [c for more in extra for c in more]}.values())
             check_lyrics(found, records)
         results = youtube.order_results(found, q)
@@ -142,6 +153,12 @@ async def search(q: str = Query(min_length=1, max_length=200), page: int = Query
     playable = mine + [r for r in playable if r["id"] not in {s["id"] for s in mine}]
     metrics.record("search_playable", q=q, page=page, shown=len(playable), hidden=len(results) - len(playable), library=len(mine))
     return playable
+
+def needs_official(found: list[dict]) -> bool:
+    """karaoke-server: the page has no official video of the song(s) it found lyrics for (or, with none, of any)."""
+    songs = lambda rs: {youtube.song_name((r.get("parsed") or {}).get("title", "")) for r in rs} - {""}
+    wanted = songs([r for r in found if r.get("lyrics_match")]) or songs(found)
+    return bool(found) and not (wanted & songs([r for r in found if r.get("kind") == "official"]))
 
 def check_lyrics(found: list[dict], records: list[dict]) -> None:
     """karaoke-server: clean names and "lyrics match" flags for these results from these LRCLIB records."""
