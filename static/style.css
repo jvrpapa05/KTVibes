@@ -240,3 +240,5 @@ body.still :is(.tv-tools,.tv-bottom,.open-remote){opacity:0;pointer-events:none}
 /* karaoke-server: the room's "lyrics in sync?" votes for the song that just ended, under the countdown */
 .vote-tally{position:fixed;left:50%;bottom:4vh;z-index:30;transform:translateX(-50%);margin:0;padding:.55em 1.2em;border-radius:999px;background:#000000a8;font-size:clamp(16px,1.6vw,28px);color:#ffffffd0;letter-spacing:.01em;font-variant-numeric:tabular-nums;white-space:nowrap}
 .vote-tally b{color:#fff;font-weight:700}
+/* karaoke-server: what kind of video this is, so scenery isn't a surprise ("Scenery · lyric video") */
+.tv #now-card .song-kind{align-self:flex-start;margin:.15em 0 0;padding:.12em .6em;border-radius:999px;background:#ffffff1f;color:#ffffffd9;font:600 clamp(11px,.85vw,16px)/1.35 'Space Grotesk',sans-serif;letter-spacing:.02em}

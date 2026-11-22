@@ -433,7 +433,7 @@ async def enqueue(song: Song):
         raise HTTPException(409, "This song has no lyrics that line up, so it can't be sung")
     try:
         singer = state.claim_singer(song.singer, song.device) if song.singer else ""
-        item = await state.add(song.id, song.artist, song.title, singer, song.device if singer else "")
+        item = await state.add(song.id, song.artist, song.title, singer, song.device if singer else "", song.kind)
         metrics.record("queue_add", song=song.id, title=song.title, artist=song.artist, singer=singer, rank=song.rank,
                        kind=song.kind, from_search=song.rank is not None, queue=len(state.upcoming), cached=song.id in prepared_songs())
         return item

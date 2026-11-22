@@ -57,6 +57,7 @@ HISTORY = 200  # remembered plays, for the remote's "Recent" list
 UNDO_SECONDS = 15  # how long a removal can be taken back
 SAVE_EVERY = 10  # seconds between queue.json writes for position reports alone
 BREATHER = 4  # seconds between one song ending and the next starting
+KIND_LABELS = ("official", "lyric", "audio", "other", "cover", "live")  # karaoke-server: video kinds search may pass along
 # karaoke-server: "Were the lyrics in sync?" after each song (user, 2026-11-22). Everyone can vote; the countdown is
 # VOTE_WAIT and drops to VOTE_FAST once every singer with a song in the queue has voted. Voting stays open until
 # VOTE_AFTER seconds into the next song. Songs stopped before VOTE_MIN_PLAYED aren't asked about.
@@ -415,10 +416,12 @@ class State:
         if old and old.casefold() in self.profiles and new.casefold() not in self.profiles:
             self.profiles[new.casefold()] = self.profiles.pop(old.casefold())
 
-    async def add(self, video_id, artist, title, singer="", device=""):
+    async def add(self, video_id, artist, title, singer="", device="", kind=""):
         if self.queued(video_id):
             raise ValueError("That song is already in the queue")
         item = self.entry(video_id, artist, title, singer)
+        if kind in KIND_LABELS:
+            item["kind"] = kind  # karaoke-server: what search called this video (official, lyric, ...), shown on the TV
         if device:
             self.owners[item["key"]] = device
         self.upcoming.append(item)

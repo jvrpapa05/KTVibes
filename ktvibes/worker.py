@@ -354,7 +354,9 @@ async def run(state, cache: Path):
                     log.exception("Word timing unavailable for %s", item["id"])
             item["offset"] = float(meta.get("lyric_offset") or 0)
             # karaoke-server: a lyric video (its own words on screen) can be swapped for scenery on the TV
-            item["lyric_video"] = youtube.kind(meta.get("source_title") or "") == "lyric"
+            # the kind search gave when it was queued (it saw the channel); otherwise read off the YouTube title
+            item["kind"] = meta["kind"] = item.get("kind") or meta.get("kind") or youtube.kind(meta.get("source_title") or "")
+            item["lyric_video"] = item["kind"] == "lyric"
             meta.update(duration=item["duration"], artist=item["artist"], title=item["title"])
             item["number"] = songbook.assign(cache, meta)
             save_meta(folder, meta)

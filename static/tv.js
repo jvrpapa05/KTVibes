@@ -93,6 +93,9 @@ function render(next){
  else if(state.current&&(state.current.lyrics_rev||0)!==lyricsRev){activeLine=-1;relayout();showLyrics(state.current);}
  // "Hide video" keeps the plain stage layout; the video element stays loaded so it can come back in sync.
  document.body.classList.toggle('has-video',(showVideo()&&!video.error)||!!sceneryNow());
+ // karaoke-server: a small label on the top-left card says what's on screen (user, 2026-11-22)
+ {const c=state.current,label=!c?'':sceneryNow()?'Scenery · lyric video':{official:'Official video',lyric:'Lyric video',audio:'Audio'}[c.kind]||'';
+  if($('song-kind').textContent!==label)$('song-kind').textContent=label;$('song-kind').hidden=!label;}
  // Switching layout, size or guide changes how wide each line is: place and fit the lines again.
  const nextFit=`${state.lyric_mode}|${state.lyric_scale}|${state.guide}`;
  if(nextFit!==fitKey){fitKey=nextFit;relayout();}
