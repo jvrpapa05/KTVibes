@@ -651,6 +651,31 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         real_lengths(records)
         self.assertEqual([r["length"] for r in records], [246.0, 246.0])
 
+    def test_lrclib_answers_are_kept_and_stand_in_when_it_is_down(self):
+        # karaoke-server (beta 2026-11-22): LRCLIB slowed to 2-12 s; searches gave up and showed nothing playable
+        import asyncio, tempfile, httpx
+        from pathlib import Path
+        from ktvibes import lyrics
+        folder = tempfile.TemporaryDirectory(); self.addCleanup(folder.cleanup)
+        lyrics.set_lrclib_cache(Path(folder.name)); self.addCleanup(lyrics.set_lrclib_cache, None)
+        calls = []
+        async def answer(self, request):
+            calls.append(str(request.url))
+            if len(calls) > 1:
+                raise httpx.ConnectTimeout("down")
+            return httpx.Response(200, json=[{"id": 1}], request=request)
+        async def get():
+            async with lyrics.lrclib() as client:
+                return (await client.get("/api/search", params={"q": "palagi"})).json()
+        with unittest.mock.patch.object(httpx.AsyncHTTPTransport, "handle_async_request", answer):
+            self.assertEqual(asyncio.run(get()), [{"id": 1}])   # asked, and kept
+            self.assertEqual(asyncio.run(get()), [{"id": 1}])   # under a day old: not asked again
+            self.assertEqual(len(calls), 1)
+            for kept in Path(folder.name).iterdir():
+                import os; os.utime(kept, (0, 0))                # make it old
+            self.assertEqual(asyncio.run(get()), [{"id": 1}])   # LRCLIB down: the old answer stands in
+            self.assertEqual(len(calls), 2)
+
     def test_accents_do_not_stop_a_match(self):
         # karaoke-server: 5,000-song study (2026-11-22): "GIVĒON - Heartbreak Anniversary (Official Music Video)" vs
         # LRCLIB's "Giveon", and "MÍA" vs "MIA": the official video was passed over

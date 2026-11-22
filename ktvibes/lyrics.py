@@ -3,6 +3,8 @@ import asyncio
 import json
 import re
 import sys
+import time
+from pathlib import Path
 
 STAMP = re.compile(r"\[(\d+):(\d+(?:\.\d+)?)\]")
 VOICE = re.compile(r"(v\d+):\s*")
@@ -495,9 +497,63 @@ def fits(candidate: dict, duration: float) -> bool:
     length = candidate.get("length", candidate.get("duration")) or 0  # karaoke-server: real length when known
     return bool(STAMP.search(candidate.get("syncedLyrics") or "")) and abs(float(length) - duration) <= 10
 
+# karaoke-server (beta 2026-11-22): LRCLIB slowed to 2-12 s per answer and five live searches gave up waiting. Every
+# answer is kept on disk (<cache>/lrclib/): one under a day old is used without asking again, and an older one stands
+# in when LRCLIB is slow or down. Set with set_lrclib_cache() at startup; None (tests, scripts) keeps nothing.
+LRCLIB_CACHE: Path | None = None
+LRCLIB_FRESH = 24 * 3600
+
+def set_lrclib_cache(directory: Path | None):
+    global LRCLIB_CACHE
+    LRCLIB_CACHE = directory
+
+def lrclib_cached(url: str, fresh: bool = True) -> bytes | None:
+    """The kept answer for this LRCLIB URL (only if under LRCLIB_FRESH old, unless fresh=False)."""
+    import hashlib
+    if LRCLIB_CACHE is None:
+        return None
+    path = LRCLIB_CACHE / hashlib.sha256(url.encode()).hexdigest()
+    try:
+        if fresh and time.time() - path.stat().st_mtime > LRCLIB_FRESH:
+            return None
+        return path.read_bytes()
+    except OSError:
+        return None
+
 def lrclib():
     import httpx
-    return httpx.AsyncClient(base_url="https://lrclib.net", timeout=20, headers={"User-Agent": "KTVibes/0.2 (home karaoke)"})
+
+    class Kept(httpx.AsyncBaseTransport):
+        def __init__(self):
+            self.inner = httpx.AsyncHTTPTransport()
+
+        async def handle_async_request(self, request):
+            url = str(request.url)
+            if request.method == "GET" and (body := lrclib_cached(url)) is not None:
+                return httpx.Response(200, content=body, headers={"content-type": "application/json"}, request=request)
+            try:
+                response = await self.inner.handle_async_request(request)
+                body = await response.aread()
+            except httpx.TransportError:
+                if request.method == "GET" and (body := lrclib_cached(url, fresh=False)) is not None:
+                    return httpx.Response(200, content=body, headers={"content-type": "application/json"}, request=request)
+                raise
+            if request.method == "GET" and response.status_code == 200 and LRCLIB_CACHE is not None:
+                import hashlib
+                try:
+                    LRCLIB_CACHE.mkdir(parents=True, exist_ok=True)
+                    temporary = LRCLIB_CACHE / f".{hashlib.sha256(url.encode()).hexdigest()}.tmp"
+                    temporary.write_bytes(body)
+                    temporary.replace(LRCLIB_CACHE / hashlib.sha256(url.encode()).hexdigest())
+                except OSError:
+                    pass
+            return httpx.Response(response.status_code, content=body, headers=response.headers, request=request)
+
+        async def aclose(self):
+            await self.inner.aclose()
+
+    # identity: kept answers are plain JSON
+    return httpx.AsyncClient(base_url="https://lrclib.net", timeout=20, headers={"User-Agent": "KTVibes/0.2 (home karaoke)", "Accept-Encoding": "identity"}, transport=Kept())
 
 async def search(query: str, duration: float) -> list[dict]:
     """Free-text LRCLIB search for the remote, when the automatic lookup found nothing or the wrong song.

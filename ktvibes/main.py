@@ -35,6 +35,7 @@ async def lifespan(app):
     task = asyncio.create_task(worker.run(state, CACHE))
     ahead = asyncio.create_task(worker.prefetch(state, CACHE))  # karaoke-server: download the next songs early
     metrics.setup(CACHE, VERSION)
+    lyrics.set_lrclib_cache(CACHE / "lrclib")  # karaoke-server: LRCLIB answers kept on disk (see lyrics.lrclib)
     metrics.record("server_start", songs=len(prepared_songs()))
     room = asyncio.create_task(room_snapshots())
     try:
@@ -98,16 +99,25 @@ async def suggest(q: str = Query(min_length=1, max_length=200)):
     except Exception:
         return []  # completions are a nicety; never surface their failures
 
-async def lyric_records(q: str = "", artist: str = "", title: str = "") -> list[dict]:
+_lrclib_tasks = set()  # karaoke-server: LRCLIB lookups still running after a search stopped waiting for them
+
+async def lyric_records(q: str = "", artist: str = "", title: str = "", wait: float = 5) -> list[dict]:
     """karaoke-server: every LRCLIB record for this search (or this artist + song); [] if LRCLIB is slow/down."""
     params = {"artist_name": artist, "track_name": title} if title else {"q": q}
-    try:
+    async def ask():
         async with lyrics.lrclib() as client:
-            response = await asyncio.wait_for(client.get("/api/search", params=params), 6)
-        return response.json()
+            return (await client.get("/api/search", params=params)).json()
+    task = asyncio.ensure_future(ask())
+    _lrclib_tasks.add(task); task.add_done_callback(_lrclib_tasks.discard)
+    try:
+        # karaoke-server: a slow answer is still waited for in the background (and kept), so the next search has it
+        return await asyncio.wait_for(asyncio.shield(task), wait)
     except Exception:
-        logging.getLogger("uvicorn.error").warning("LRCLIB lookup for search %r failed", q, exc_info=True)
-        return []
+        # karaoke-server: LRCLIB too slow for a search: the last answer kept for it, however old
+        import httpx
+        kept = lyrics.lrclib_cached(str(httpx.URL("https://lrclib.net/api/search", params=params)), fresh=False)
+        logging.getLogger("uvicorn.error").warning("LRCLIB lookup for search %r failed%s", q or f"{artist} - {title}", "; using the kept answer" if kept else "")
+        return json.loads(kept) if kept else []
 
 @app.get("/api/search")
 async def search(q: str = Query(min_length=1, max_length=200), page: int = Query(0, ge=0, le=9)):
@@ -131,7 +141,7 @@ async def search(q: str = Query(min_length=1, max_length=200), page: int = Query
         # official video for ~40% of them ("Drake One Dance", "One Direction Night Changes").
         more_videos = asyncio.to_thread(youtube.search, f"{q} official music video") if page == 0 and needs_official(found) else None
         if unsure or more_videos:
-            extra = await asyncio.gather(*(lyric_records(artist=p["artist"], title=p["title"]) for p in list(unsure.values())[:3]),
+            extra = await asyncio.gather(*(lyric_records(artist=p["artist"], title=p["title"], wait=3.5) for p in list(unsure.values())[:3]),
                                          *([more_videos] if more_videos else []), return_exceptions=True)
             if more_videos:
                 page2 = extra.pop()
