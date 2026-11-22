@@ -346,6 +346,7 @@ class State:
         for name in PROFILE if profile else ():
             if name in profile:
                 setattr(self, name, profile[name])
+        self.video_mode = "show"  # karaoke-server: Blur/Hide removed (2026-11-22); older profiles may still hold them
 
     def remember_profile(self):
         """karaoke-server: a change made during someone's song becomes that singer's profile."""
@@ -605,6 +606,8 @@ class State:
                 raise ValueError(f"Unknown {action.replace('_', ' ')}")
             if action == "lyric_mode" and self.theme == "classic":
                 value = "two"  # Classic always shows two lines (a TV restoring its own setting must not fail)
+            if action == "video_mode":
+                value = "show"  # karaoke-server (user, 2026-11-22): Blur and Hide removed; videos always show
             setattr(self, action, value)
             if action == "lyric_video":
                 self.assign_scenery()  # switched on mid-song: the song on stage gets its scenery now

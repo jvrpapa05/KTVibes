@@ -104,6 +104,16 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         await state.control({'action': 'guide', 'value': 'cycle'})
         self.assertEqual(state.guide, 'latin')
 
+    async def test_video_always_shows(self):
+        # karaoke-server (user, 2026-11-22): "simplify the display ... remove blur and hide"
+        state = State()
+        await state.control({'action': 'video_mode', 'value': 'blur'})   # an older phone or a TV restoring its setting
+        self.assertEqual(state.video_mode, 'show')
+        state.profiles['ana'] = {'video_mode': 'hide'}
+        a = await state.add('abcdefghijk', 'A', 'First', 'Ana'); a['status'] = 'ready'
+        state.promote()
+        self.assertEqual(state.video_mode, 'show')
+
     async def test_renaming_a_singer_updates_their_songs(self):
         # karaoke-server (beta 2026-11-22): "When I change my name in realtime, does it update what is shown in the TV?"
         state = State()
@@ -243,9 +253,9 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         state = State()
         await state.control({'action': 'video_mode', 'value': 'blur'})
         await state.control({'action': 'lyric_mode', 'value': 'two'})
-        self.assertEqual((state.video_mode, state.lyric_mode), ('blur', 'two'))
+        self.assertEqual((state.video_mode, state.lyric_mode), ('show', 'two'))  # karaoke-server: Blur/Hide removed, video always shows
         await state.control({'action': 'video_mode', 'value': 'cycle'})
-        self.assertEqual(state.video_mode, 'hide')
+        self.assertEqual(state.video_mode, 'show')
         with self.assertRaises(ValueError):
             await state.control({'action': 'lyric_mode', 'value': 'sideways'})
         self.assertEqual(state.snapshot()['lyric_mode'], 'two')
@@ -338,7 +348,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         await state.control({'action': 'lyric_scale', 'value': 1.0})
         (await state.add('ccccccccccc', 'A', 'S', 'Anna'))['status'] = 'ready'
         state.advance()                                   # Anna again: all her settings come back
-        self.assertEqual((state.lyric_scale, state.video_mode, state.lyric_mode, state.music), (2.0, 'blur', 'scroll', 0.6))
+        self.assertEqual((state.lyric_scale, state.video_mode, state.lyric_mode, state.music), (2.0, 'show', 'scroll', 0.6))  # karaoke-server: video always shows
         self.assertEqual(state.profiles['bea']['video_mode'], 'show')
 
     async def test_a_phone_edits_its_own_profile_not_the_singer_on_stage(self):
