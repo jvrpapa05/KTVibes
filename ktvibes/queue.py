@@ -10,7 +10,8 @@ import time
 import uuid
 from . import songbook, metrics
 
-DISPLAY = {"video_mode": ("show", "blur", "hide"), "lyric_mode": ("two", "scroll", "off"), "theme": ("default",)}  # karaoke-server: Classic theme removed (English-only users)
+DISPLAY = {"video_mode": ("show", "blur", "hide"), "lyric_mode": ("two", "scroll", "off"), "theme": ("default",),
+           "lyric_video": ("scenery", "video")}  # karaoke-server: what plays on a lyric video's song (see scenery.py)  # karaoke-server: Classic theme removed (English-only users)
 def following(options, current):
     """The option after `current`, wrapping round: what a "cycle" control switches to."""
     return options[(options.index(current) + 1) % len(options)]
@@ -89,6 +90,8 @@ class State:
         self.guide = "off"  # karaoke-server: pronunciation guides removed (English-only users); always off
         self.lyric_scale = 1.5
         self.video_mode = "show"  # show | blur | hide: blur suits lyric videos, whose own lyrics clash
+        self.lyric_video = "scenery"  # karaoke-server: scenery | video, for songs whose video is a lyric video
+        self.scenery = None  # karaoke-server: scenery.Scenery, set at startup
         self.lyric_mode = "two"  # two (classic two-line KTV) | scroll | off
         self.theme = "default"  # default | classic (Korean noraebang look, with a room timer)
         self.room_ends = None  # unix time a Classic room's singing time runs out
@@ -130,7 +133,7 @@ class State:
         """Lyrics are large and only the TV draws them, so broadcasts leave them out (see broadcast)."""
         brief = lambda item: item if lyrics or item is None else {k: v for k, v in item.items() if k != "lyrics"}
         return {"current": brief(self.current), "upcoming": [brief(i) for i in self.upcoming], "playing": self.playing,
-                "offset": self.offset, "vocal": self.vocal, "music": self.music, "guide": self.guide, "guides": self.guides(), "lyric_scale": self.lyric_scale, "video_mode": self.video_mode, "lyric_mode": self.lyric_mode, "theme": self.theme, "room_ends": self.room_ends, "time_up": self.time_up(), "profiles": self.profiles, "speed": self.speed, "key": self.key, "seek_id": self.seek_id, "position": self.position,
+                "offset": self.offset, "vocal": self.vocal, "music": self.music, "guide": self.guide, "guides": self.guides(), "lyric_scale": self.lyric_scale, "video_mode": self.video_mode, "lyric_mode": self.lyric_mode, "lyric_video": self.lyric_video, "theme": self.theme, "room_ends": self.room_ends, "time_up": self.time_up(), "profiles": self.profiles, "speed": self.speed, "key": self.key, "seek_id": self.seek_id, "position": self.position,
                 "transition_until": self.transition_until, "server_time": time.time(),
                 "player_connected": self.player is not None, "player_audio": self.player is not None and self.audio,
                 "revision": self.revision, "build": self.build, "version": VERSION, "phones": sum(role == "remote" for role in self.clients.values()),
@@ -225,6 +228,7 @@ class State:
         self.theme = saved.get("theme") if saved.get("theme") in DISPLAY["theme"] else "default"
         self.singers = saved["singers"] if isinstance(saved.get("singers"), dict) else {}
         self.profiles = saved["profiles"] if isinstance(saved.get("profiles"), dict) else {}
+        self.lyric_video = saved.get("lyric_video") if saved.get("lyric_video") in DISPLAY["lyric_video"] else "scenery"
         self.room_ends = float(saved["room_ends"]) if self.theme == "classic" and isinstance(saved.get("room_ends"), (int, float)) else None
         entries = saved.get("upcoming", [])
         if saved.get("current"):
@@ -244,7 +248,7 @@ class State:
         brief = lambda i: {"id": i["id"], "artist": i["artist"], "title": i["title"], "singer": i.get("singer", ""), "device": self.owners.get(i["key"], "")}
         data = {"current": self.current and {**brief(self.current), "position": self.position},
                 "upcoming": [brief(i) for i in self.upcoming if i["status"] != "error"], "played": self.played,
-                "theme": self.theme, "room_ends": self.room_ends, "singers": self.singers, "profiles": self.profiles}
+                "theme": self.theme, "room_ends": self.room_ends, "singers": self.singers, "profiles": self.profiles, "lyric_video": self.lyric_video}
         temporary = self.path.with_suffix(".tmp")
         temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         temporary.replace(self.path)
@@ -285,6 +289,15 @@ class State:
             self.player = None
             self.audio = False
 
+    def assign_scenery(self):
+        """karaoke-server: a lyric video's song on stage gets its own stretch of scenery while the room wants it."""
+        item = self.current
+        if item and item.get("lyric_video") and self.lyric_video == "scenery" and not item.get("scenery") and self.scenery:
+            try:
+                item["scenery"] = self.scenery.take(float(item.get("duration") or 0) + 5)
+            except Exception:
+                logging.getLogger("uvicorn.error").exception("Scenery unavailable")
+
     def duration_sung(self):
         """karaoke-server: seconds into the song on stage (position as last reported by the TV)."""
         return float(self.position or 0)
@@ -315,6 +328,7 @@ class State:
                     self.played = dict(sorted(self.played.items(), key=lambda p: p[1])[-HISTORY:])
                 self.offset = candidate.get("offset", 0)
                 self.apply_profile()
+                self.assign_scenery()
                 # Cantopop reads in jyutping, Mandarin in pinyin: follow the song when on either.
                 if self.guide in ("latin", "jyutping"):
                     from .lyrics import cantonese
@@ -592,6 +606,8 @@ class State:
             if action == "lyric_mode" and self.theme == "classic":
                 value = "two"  # Classic always shows two lines (a TV restoring its own setting must not fail)
             setattr(self, action, value)
+            if action == "lyric_video":
+                self.assign_scenery()  # switched on mid-song: the song on stage gets its scenery now
             if action in PROFILE:
                 self.remember_profile()
             if action == "theme":

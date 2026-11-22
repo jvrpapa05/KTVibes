@@ -92,7 +92,7 @@ function render(next){
  }
  else if(state.current&&(state.current.lyrics_rev||0)!==lyricsRev){activeLine=-1;relayout();showLyrics(state.current);}
  // "Hide video" keeps the plain stage layout; the video element stays loaded so it can come back in sync.
- document.body.classList.toggle('has-video',showVideo()&&!video.error);
+ document.body.classList.toggle('has-video',(showVideo()&&!video.error)||!!sceneryNow());
  // Switching layout, size or guide changes how wide each line is: place and fit the lines again.
  const nextFit=`${state.lyric_mode}|${state.lyric_scale}|${state.guide}`;
  if(nextFit!==fitKey){fitKey=nextFit;relayout();}
@@ -105,7 +105,24 @@ function render(next){
 }
 // Lyrics for the song on stage; a remote can swap in another version mid-song (lyrics_rev).
 let lyricsRev=0,songLyrics=[],splitDone=false,slots=[],counting=null,still=false;  // counting: the line showing count-in dots; still: place the next lines without animating (after a resize)
-const showVideo=()=>!!state?.current?.video&&state.video_mode!=='hide';
+// karaoke-server (user, 2026-11-22): a lyric video's own words clash with ours, so the room can show calm scenery
+// instead (Settings › Lyric videos). The server hands each such song its own stretch of the scenery films (never the
+// same stretch twice, intros cut); it follows the song's position, pausing and resuming with it.
+const sceneryNow=()=>state?.current?.scenery&&state.lyric_video==='scenery'&&state.video_mode!=='hide'?state.current.scenery:null;
+const showVideo=()=>!!state?.current?.video&&state.video_mode!=='hide'&&!sceneryNow();
+const scenery=document.getElementById('scenery');
+function showScenery(waiting){
+ const sc=sceneryNow();
+ if(!sc||waiting){if(!scenery.paused)scenery.pause();scenery.hidden=true;return false;}
+ const src=`/scenery/${sc.file}`;
+ if(scenery.dataset.src!==src){scenery.dataset.src=src;scenery.src=src;scenery.load();}
+ const target=sc.start+(music.currentTime||0);
+ if(scenery.readyState>=1&&Math.abs(scenery.currentTime-target)>2)scenery.currentTime=target;
+ if(music.paused||!state.playing){if(!scenery.paused)scenery.pause();}else if(scenery.paused&&scenery.readyState>=2)scenery.play().catch(()=>{});
+ scenery.hidden=false;
+ if(!video.paused)video.pause();
+ return true;
+}
 // Place the lyrics from scratch (new song or lyrics, layout, size, guide or window change).
 function relayout(){shownPair='';lyricsPositioned=false;splitDone=false;if(lyrics!==songLyrics){activeLine=-1;placeLyrics(songLyrics);}}
 // Two-line KTV, like a karaoke machine: lines take turns in a top and a bottom slot, and the next
@@ -351,7 +368,8 @@ function frame(now){
   if(!state.current||waiting)document.body.classList.remove('intro');
   document.body.classList.toggle('between',!!waiting);
   video.hidden=!showVideo()||!!waiting||!!video.error;
-  $('video-shade').hidden=video.hidden;
+  const sceneryShown=showScenery(!!waiting);
+  $('video-shade').hidden=video.hidden&&!sceneryShown;
   if(state.current&&!waiting&&enabled&&state.playing)start();
   if(showVideo()&&!waiting&&!buffering&&!music.paused&&state.playing&&video.readyState>=3){
    // karaoke-server: catch up gently. A small drift is fixed by playing the video up to 10% faster or slower,

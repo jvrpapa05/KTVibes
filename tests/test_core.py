@@ -678,6 +678,24 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         lyrics.set_lrclib_cache(Path(folder.name))                  # at startup, answers over 30 days old go
         self.assertEqual(list(Path(folder.name).iterdir()), [])
 
+    def test_scenery_never_repeats_until_every_film_is_used(self):
+        # karaoke-server (user, 2026-11-22): scenery instead of lyric videos; "never replayed"; no intros
+        import tempfile
+        from pathlib import Path
+        from ktvibes import scenery
+        folder = tempfile.TemporaryDirectory(); self.addCleanup(folder.cleanup)
+        s = scenery.Scenery(Path(folder.name))
+        s.films = lambda state: [("aaaaaaaaaaa.mp4", 600.0), ("bbbbbbbbbbb.mp4", 500.0)]
+        got = [s.take(200) for _ in range(5)]
+        self.assertEqual([g["file"][0] for g in got], ["a", "a", "b", "b", "a"])
+        self.assertEqual(got[0]["start"], scenery.EDGE)                    # the film's first seconds are skipped
+        self.assertGreaterEqual(got[1]["start"], got[0]["start"] + 200)    # the next song gets the next stretch
+        self.assertTrue(all(g["start"] + 200 <= (600 if g["file"][0] == "a" else 500) - scenery.EDGE for g in got))
+        self.assertEqual(got[4]["start"], scenery.EDGE)                    # only once both films are used up: again
+        self.assertEqual(scenery.Scenery(Path(folder.name)).take(10) is not None, False)  # a fresh object with no films
+        again = scenery.Scenery(Path(folder.name)); again.films = s.films
+        self.assertGreater(again.take(50)["start"], got[4]["start"])       # the place is kept across restarts
+
     def test_accents_do_not_stop_a_match(self):
         # karaoke-server: 5,000-song study (2026-11-22): "GIVĒON - Heartbreak Anniversary (Official Music Video)" vs
         # LRCLIB's "Giveon", and "MÍA" vs "MIA": the official video was passed over

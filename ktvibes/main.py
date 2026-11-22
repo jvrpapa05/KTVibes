@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from .queue import State, VERSION
 from . import metrics  # karaoke-server: local usage/health metrics (cache/metrics.jsonl)
-from . import lyrics, songbook, stems, worker, youtube
+from . import lyrics, scenery, songbook, stems, worker, youtube
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = Path(os.environ.get("KTVIBES_CACHE", ROOT / "cache"))
@@ -36,6 +36,7 @@ async def lifespan(app):
     ahead = asyncio.create_task(worker.prefetch(state, CACHE))  # karaoke-server: download the next songs early
     metrics.setup(CACHE, VERSION)
     lyrics.set_lrclib_cache(CACHE / "lrclib")  # karaoke-server: LRCLIB answers kept on disk (see lyrics.lrclib)
+    state.scenery = scenery.Scenery(CACHE / "scenery")  # karaoke-server: scenery instead of lyric videos
     metrics.record("server_start", songs=len(prepared_songs()))
     room = asyncio.create_task(room_snapshots())
     try:
@@ -452,6 +453,14 @@ async def claim_singer(singer: Singer):
         raise HTTPException(409, str(exc)) from exc
     await state.broadcast()  # karaoke-server: a renamed singer's songs show the new name on the TV and phones at once
     return {"name": name}
+
+@app.get("/scenery/{name}")
+async def scenery_film(name: str):
+    """karaoke-server: a scenery film for the TV (see scenery.py)."""
+    path = CACHE / "scenery" / name
+    if not scenery.NAME.fullmatch(name) or not path.is_file():
+        raise HTTPException(404, "No such scenery")
+    return FileResponse(path, media_type="video/mp4")
 
 @app.get("/media/{video_id}/{filename}")
 async def media(video_id: str, filename: str):
