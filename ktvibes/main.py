@@ -116,11 +116,16 @@ async def search(q: str = Query(min_length=1, max_length=200), page: int = Query
         check_lyrics(found, records)
         # A free-text lookup lists ~20 records, so a song can be missed ("Why" has many). Ask about the most likely
         # unconfirmed versions by artist + song (at most 3, together), then check again.
-        unsure = {}
+        # karaoke-server: the names most results agree on first ("good girls 5sos": four videos say "5 Seconds of
+        # Summer - Good Girls", which LRCLIB knows; "5SOS - Good Girls" it doesn't)
+        unsure, votes = {}, {}
         for r in found:
             p = r.get("parsed") or {}
             if not r.get("lyrics_match") and r.get("kind") not in ("cover", "live") and p.get("artist") and p.get("title"):
-                unsure.setdefault((youtube.lead_artist(p["artist"]), youtube.song_name(p["title"])), p)
+                key = (youtube.lead_artist(p["artist"]), youtube.song_name(p["title"]))
+                unsure.setdefault(key, p)
+                votes[key] = votes.get(key, 0) + 1
+        unsure = dict(sorted(unsure.items(), key=lambda kv: -votes[kv[0]]))  # stable: YouTube's order among equals
         # karaoke-server: no official video of the song on the page (5,000-song study, 2026-11-22: 12% of songs, mostly
         # OPM): YouTube is asked once more for "<search> official music video", meanwhile. That found a playable
         # official video for ~40% of them ("Drake One Dance", "One Direction Night Changes").
