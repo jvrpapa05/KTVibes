@@ -561,6 +561,18 @@ async def candidates(artist: str, title: str, duration: float, hints: tuple[str,
 
 async def fetch(artist: str, title: str, duration: float, hints: tuple[str, ...] = ()) -> dict:
     matches = await candidates(artist, title, duration, hints)
+    if matches:
+        # karaoke-server (beta report 2026-11-22, TJ Monterde "Palagi"): the first lookup asks for a record of the
+        # video's length and can stop at a mislabelled one (album timing labelled 238 s, the video's length; the album
+        # is 218 s). Its real length then came from that one record, the lengths "matched", and timing could only
+        # nudge the lyrics 5 s when they needed 17. Every record of the song decides the real length.
+        try:
+            async with lrclib() as client:
+                more = (await client.get("/api/search", params={"artist_name": artist, "track_name": title})).json()
+            known = {c.get("id") for c in matches}
+            real_lengths([c for c in matches + [m for m in more if m.get("id") not in known] if c.get("syncedLyrics")])
+        except Exception:  # LRCLIB slow or down: keep the candidates' own lengths
+            pass
     raw = matches[0].get("syncedLyrics", "") if matches else ""
     # karaoke-server: the length of the recording these lyrics were timed to (see worker.timed_lyrics)
     return {"raw": raw, "lines": parse_lrc(raw), "duration": matches[0].get("length") if matches else None}
