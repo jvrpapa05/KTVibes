@@ -347,6 +347,7 @@ class State:
             if name in profile:
                 setattr(self, name, profile[name])
         self.video_mode = "show"  # karaoke-server: Blur/Hide removed (2026-11-22); older profiles may still hold them
+        self.speed = 1.0  # karaoke-server: speed removed (2026-11-22); older profiles may still hold one
 
     def remember_profile(self):
         """karaoke-server: a change made during someone's song becomes that singer's profile."""
@@ -441,7 +442,7 @@ class State:
     def setting(self, action, value):
         """The checked value of one profile setting, with the same limits as the live controls."""
         if action == "speed":
-            return round(max(0.5, min(1.5, number(value))), 2)
+            return 1.0  # karaoke-server: speed removed (2026-11-22)
         if action == "key":
             return int(max(-6, min(6, round(number(value)))))
         if action in ("vocal", "music"):
@@ -626,8 +627,7 @@ class State:
                 raise ValueError("Add between 1 and 120 minutes")
             self.room_ends = max(time.time(), self.room_ends or 0) + minutes * 60
         elif action == "speed":
-            self.speed = round(max(0.5, min(1.5, number(message["value"]))), 2)
-            self.remember_profile()
+            self.speed = 1.0  # karaoke-server (user, 2026-11-22): "no one wants to speed up their song"; always 100%
         elif action == "key":
             self.key = int(max(-6, min(6, round(number(message["value"])))))
             self.remember_profile()

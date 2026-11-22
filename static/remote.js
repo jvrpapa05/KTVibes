@@ -142,7 +142,7 @@ function showControls(before){
  const v=view();$('sheet-scope').textContent=editingOwn()?`Your settings · used when ${singer()}'s songs play`:'Changes show on the device';
  for(const id of ['skip','scrub','key-down','key-up'])$(id).disabled=!state.current;
  $('scrub').max=state.current?.duration||1;
- for(const [id,value] of [['vocal',v.vocal],['music',v.music],['speed',v.speed]]){
+ for(const [id,value] of [['vocal',v.vocal],['music',v.music]]){
   if(document.activeElement!==$(id)&&!gliding)$(id).value=value;$(`${id}-value`).textContent=`${Math.round(value*100)}%`;
  }
  for(const b of document.querySelectorAll('.presets button'))b.setAttribute('aria-pressed',Math.abs(b.dataset.vocal-v.vocal)<.005&&Math.abs(b.dataset.music-v.music)<.005);
@@ -171,8 +171,8 @@ function rollKey(key,direction){
 }
 $('key-down').onclick=()=>{haptic(8);send({action:'key',value:view().key-1});};
 $('key-up').onclick=()=>{haptic(8);send({action:'key',value:view().key+1});};
-$('key-reset').onclick=()=>{send({action:'speed',value:1});send({action:'key',value:0});};
-for(const [id,action] of [['vocal','vocal'],['music','music'],['speed','speed']]){const sendValue=throttle(value=>send({action,value}));$(id).oninput=()=>sendValue(Number($(id).value));}
+$('key-reset').onclick=()=>send({action:'key',value:0});
+for(const [id,action] of [['vocal','vocal'],['music','music']]){const sendValue=throttle(value=>send({action,value}));$(id).oninput=()=>sendValue(Number($(id).value));}
 // Presets set both sliders, gliding there so the change is visible; A cappella is the singer alone.
 let gliding=false;
 for(const b of document.querySelectorAll('.presets button'))b.onclick=()=>{

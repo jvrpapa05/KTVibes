@@ -245,7 +245,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         await state.control({'action': 'music', 'value': -1})
         self.assertEqual(state.music, 0)
         await state.control({'action': 'speed', 'value': 3})
-        self.assertEqual(state.speed, 1.5)
+        self.assertEqual(state.speed, 1.0)  # karaoke-server: speed removed (2026-11-22); always 100%
         await state.control({'action': 'key', 'value': -9})
         self.assertEqual(state.key, -6)
 
@@ -326,7 +326,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
             await sing('ccccccccccc', 'anna')  # same singer, any case
             self.assertEqual((state.vocal, state.key, state.speed), (0.2, -2, 1.0))
             await sing('ddddddddddd', 'Bea')
-            self.assertEqual((state.vocal, state.key, state.speed), (0.5, 0, 0.9))
+            self.assertEqual((state.vocal, state.key, state.speed), (0.5, 0, 1.0))  # karaoke-server: speed removed, always 100%
             await sing('eeeeeeeeeee', '')  # no name: room settings, nothing saved
             await state.control({'action': 'vocal', 'value': 0.9})
             self.assertEqual(state.profiles['bea']['vocal'], 0.5)
