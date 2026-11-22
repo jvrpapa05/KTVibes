@@ -101,7 +101,7 @@ async def suggest(q: str = Query(min_length=1, max_length=200)):
 
 _lrclib_tasks = set()  # karaoke-server: LRCLIB lookups still running after a search stopped waiting for them
 
-async def lyric_records(q: str = "", artist: str = "", title: str = "", wait: float = 5) -> list[dict]:
+async def lyric_records(q: str = "", artist: str = "", title: str = "", wait: float = 5, pending: list | None = None) -> list[dict]:
     """karaoke-server: every LRCLIB record for this search (or this artist + song); [] if LRCLIB is slow/down."""
     params = {"artist_name": artist, "track_name": title} if title else {"q": q}
     async def ask():
@@ -113,6 +113,8 @@ async def lyric_records(q: str = "", artist: str = "", title: str = "", wait: fl
         # karaoke-server: a slow answer is still waited for in the background (and kept), so the next search has it
         return await asyncio.wait_for(asyncio.shield(task), wait)
     except Exception:
+        if pending is not None and not task.done():
+            pending.append(task)  # karaoke-server: still coming; search() may wait a little longer for it
         # karaoke-server: LRCLIB too slow for a search: the last answer kept for it, however old
         import httpx
         kept = lyrics.lrclib_cached(str(httpx.URL("https://lrclib.net/api/search", params=params)), fresh=False)
@@ -122,16 +124,18 @@ async def lyric_records(q: str = "", artist: str = "", title: str = "", wait: fl
 @app.get("/api/search")
 async def search(q: str = Query(min_length=1, max_length=200), page: int = Query(0, ge=0, le=9)):
     try:
-        found, records = await asyncio.gather(asyncio.to_thread(youtube.search, q, page), lyric_records(q))
-        check_lyrics(found, records)
-        # A free-text lookup lists ~20 records, so a song can be missed ("Why" has many). Ask about the most likely
-        # unconfirmed versions by artist + song (at most 3, together), then check again.
-        # karaoke-server: the names most results agree on first ("good girls 5sos": four videos say "5 Seconds of
-        # Summer - Good Girls", which LRCLIB knows; "5SOS - Good Girls" it doesn't)
+        pending = []  # LRCLIB lookups that missed their wait but are still running
+        # karaoke-server: the free-text lookup runs while YouTube answers; the artist + song lookups start as soon as
+        # YouTube's names are known, alongside it (not after it), so a slow LRCLIB costs one wait, not two.
+        by_query = asyncio.ensure_future(lyric_records(q, pending=pending))
+        found = await asyncio.to_thread(youtube.search, q, page)
+        # A free-text lookup lists ~20 records, so a song can be missed ("Why" has many). Also ask about the most
+        # likely versions by artist + song (at most 3). The names most results agree on first ("good girls 5sos":
+        # four videos say "5 Seconds of Summer - Good Girls", which LRCLIB knows; "5SOS - Good Girls" it doesn't).
         unsure, votes = {}, {}
         for r in found:
             p = r.get("parsed") or {}
-            if not r.get("lyrics_match") and r.get("kind") not in ("cover", "live") and p.get("artist") and p.get("title"):
+            if r.get("kind") not in ("cover", "live") and p.get("artist") and p.get("title"):
                 key = (youtube.lead_artist(p["artist"]), youtube.song_name(p["title"]))
                 unsure.setdefault(key, p)
                 votes[key] = votes.get(key, 0) + 1
@@ -140,17 +144,24 @@ async def search(q: str = Query(min_length=1, max_length=200), page: int = Query
         # OPM): YouTube is asked once more for "<search> official music video", meanwhile. That found a playable
         # official video for ~40% of them ("Drake One Dance", "One Direction Night Changes").
         more_videos = asyncio.to_thread(youtube.search, f"{q} official music video") if page == 0 and needs_official(found) else None
-        if unsure or more_videos:
-            extra = await asyncio.gather(*(lyric_records(artist=p["artist"], title=p["title"], wait=3.5) for p in list(unsure.values())[:3]),
-                                         *([more_videos] if more_videos else []), return_exceptions=True)
-            if more_videos:
-                page2 = extra.pop()
-                if isinstance(page2, list):
-                    seen = {r["id"] for r in found}
-                    found += [r for r in page2 if r["id"] not in seen]
-            extra = [more for more in extra if isinstance(more, list)]
-            records = list({c.get("id") or id(c): c for c in records + [c for more in extra for c in more]}.values())
-            check_lyrics(found, records)
+        extra = await asyncio.gather(by_query, *(lyric_records(artist=p["artist"], title=p["title"], pending=pending) for p in list(unsure.values())[:3]),
+                                     *([more_videos] if more_videos else []), return_exceptions=True)
+        if more_videos:
+            page2 = extra.pop()
+            if isinstance(page2, list):
+                seen = {r["id"] for r in found}
+                found += [r for r in page2 if r["id"] not in seen]
+        lists = [more for more in extra if isinstance(more, list)]
+        records = list({c.get("id") or id(c): c for more in lists for c in more}.values())
+        check_lyrics(found, records)
+        # karaoke-server (beta 2026-11-22, LRCLIB answering in 2-12 s): rather than show "nothing playable" because
+        # the lyrics lookups were slow, wait up to 8 s more for them (only then: a page with matches answers at once)
+        if pending and not any(r.get("lyrics_match") for r in found):
+            done, _ = await asyncio.wait(pending, timeout=8)
+            late = [c for task in done if not task.exception() and isinstance(task.result(), list) for c in task.result()]
+            if late:
+                records = list({c.get("id") or id(c): c for c in records + late}.values())
+                check_lyrics(found, records)
         results = youtube.order_results(found, q)
     except Exception as exc:
         metrics.record("search_failed", q=q, page=page, error=str(exc)[-200:], bot_check=bool(youtube.BOT_CHECK.search(str(exc))))

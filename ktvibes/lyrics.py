@@ -503,9 +503,19 @@ def fits(candidate: dict, duration: float) -> bool:
 LRCLIB_CACHE: Path | None = None
 LRCLIB_FRESH = 24 * 3600
 
+LRCLIB_KEEP = 30 * 24 * 3600  # answers older than this are deleted at startup (the folder can't grow forever)
+
 def set_lrclib_cache(directory: Path | None):
     global LRCLIB_CACHE
     LRCLIB_CACHE = directory
+    if directory is not None and directory.is_dir():
+        cutoff = time.time() - LRCLIB_KEEP
+        for path in directory.iterdir():
+            try:
+                if path.stat().st_mtime < cutoff:
+                    path.unlink()
+            except OSError:
+                pass
 
 def lrclib_cached(url: str, fresh: bool = True) -> bytes | None:
     """The kept answer for this LRCLIB URL (only if under LRCLIB_FRESH old, unless fresh=False)."""

@@ -675,6 +675,8 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
                 import os; os.utime(kept, (0, 0))                # make it old
             self.assertEqual(asyncio.run(get()), [{"id": 1}])   # LRCLIB down: the old answer stands in
             self.assertEqual(len(calls), 2)
+        lyrics.set_lrclib_cache(Path(folder.name))                  # at startup, answers over 30 days old go
+        self.assertEqual(list(Path(folder.name).iterdir()), [])
 
     def test_accents_do_not_stop_a_match(self):
         # karaoke-server: 5,000-song study (2026-11-22): "GIVĒON - Heartbreak Anniversary (Official Music Video)" vs
