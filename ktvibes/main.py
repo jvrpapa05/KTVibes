@@ -228,6 +228,9 @@ def lines_up(video_id: str) -> bool:
         return False
     if not any(line.get("text", "").strip() for line in timed.get("lines", [])):
         return False
+    verdict = worker.vote_verdict(folder, meta)  # karaoke-server: the room's votes come first
+    if verdict:
+        return verdict == "confirmed"
     length = meta.get("lyrics_duration")
     if length and abs(float(meta.get("duration") or 0) - float(length)) <= youtube.LYRICS_TOLERANCE:
         return True  # (a matching length with a late timing is caught when the song is prepared: worker.better_timing)

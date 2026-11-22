@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 from pathlib import Path
 import re
 import time
@@ -55,6 +56,14 @@ HISTORY = 200  # remembered plays, for the remote's "Recent" list
 UNDO_SECONDS = 15  # how long a removal can be taken back
 SAVE_EVERY = 10  # seconds between queue.json writes for position reports alone
 BREATHER = 4  # seconds between one song ending and the next starting
+# karaoke-server: "Were the lyrics in sync?" after each song (user, 2026-11-22). Everyone can vote; the countdown is
+# VOTE_WAIT and drops to VOTE_FAST once every singer with a song in the queue has voted. Voting stays open until
+# VOTE_AFTER seconds into the next song. Songs stopped before VOTE_MIN_PLAYED aren't asked about.
+VOTE_WAIT = 10
+VOTE_FAST = 3
+VOTE_AFTER = 20
+VOTE_MIN_PLAYED = float(os.environ.get("KTVIBES_VOTE_MIN_PLAYED", 30))  # tests set it lower
+VOTE_WHY = ("early", "late", "words")
 SCORE_HOLD = 5  # Classic: the score shows this long when a song is sung to the end, before the 예약곡 board
 ROOM_MINUTES = 30  # a Classic room starts with this much singing time
 
@@ -102,6 +111,7 @@ class State:
         self.build = ""  # fingerprint of the web app files; open pages reload when it changes
         self.lyrics_sent = {}  # TV socket -> key of the song whose lyrics it already has
         self.lyrics_applying = {}  # karaoke-server: song id -> {"version", "started"} while new lyrics are timed in the background
+        self.vote = None  # karaoke-server: the open "lyrics in sync?" vote (see VOTE_WAIT)
 
     def guides(self):
         """Guide modes with something to show for the current song (all of them when idle)."""
@@ -122,7 +132,83 @@ class State:
                 "transition_until": self.transition_until, "server_time": time.time(),
                 "player_connected": self.player is not None, "player_audio": self.player is not None and self.audio,
                 "revision": self.revision, "build": self.build, "version": VERSION, "phones": sum(role == "remote" for role in self.clients.values()),
-                "lyrics_applying": {k: {"version": v["version"], "started": v["started"]} for k, v in self.lyrics_applying.items()}}
+                "lyrics_applying": {k: {"version": v["version"], "started": v["started"]} for k, v in self.lyrics_applying.items()},
+                "vote": self.vote_summary()}
+
+    # karaoke-server: the lyrics vote ------------------------------------------------------------------------------
+    def vote_voters(self):
+        """Phones whose singer has a song in the queue (or just sang): the room waits for them."""
+        names = {str(i.get("singer") or "").casefold() for i in (self.vote or {}).get("song", []) + [self.current, *self.upcoming] if i}
+        return {self.singers[n]["device"] for n in names if n and n in self.singers}
+
+    def vote_summary(self):
+        vote = self.vote
+        if not vote or time.time() > vote["closes"]:
+            return None
+        votes = vote["votes"].values()
+        needed = self.vote_voters()
+        return {"key": vote["key"], "id": vote["id"], "title": vote["title"], "artist": vote["artist"], "singer": vote["singer"],
+                "up": sum(v == "up" for v in votes), "down": sum(v == "down" for v in votes),
+                "needed": len(needed), "voted_needed": len(needed & set(vote["votes"])), "closes": vote["closes"]}
+
+    def open_vote(self, item, position):
+        if position < VOTE_MIN_PLAYED or not item.get("lyrics"):
+            self.vote = None
+            return
+        now = time.time()
+        waiting = bool(self.current or any(i["status"] != "error" for i in self.upcoming))
+        if waiting:
+            self.transition_until = max(self.transition_until, now + VOTE_WAIT)
+        closes = (self.transition_until if waiting else now + VOTE_WAIT) + VOTE_AFTER
+        self.vote = {"key": item["key"], "id": item["id"], "title": item["title"], "artist": item["artist"], "singer": item.get("singer") or "",
+                     "song": [item], "votes": {}, "why": {}, "opened": now, "closes": closes}
+
+    def cast_vote(self, message):
+        """One vote per phone; a phone may change its vote. Returns the stored record for the song's meta."""
+        vote = self.vote
+        device = str(message.get("device") or "")
+        if not vote or message.get("key") != vote["key"] or time.time() > vote["closes"]:
+            raise ValueError("Voting for that song has closed")
+        if len(device) < 8:
+            raise ValueError("This remote needs a reload")
+        value = message.get("value")
+        if value not in ("up", "down"):
+            raise ValueError("Vote up or down")
+        why = message.get("why")
+        if why is not None and why not in VOTE_WHY:
+            raise ValueError("Unknown reason")
+        vote["votes"][device] = value
+        if value == "up":
+            vote["why"].pop(device, None)
+        elif why:
+            vote["why"][device] = why
+        # everyone the room was waiting for has voted: start the next song soon
+        needed = self.vote_voters()
+        if needed and needed <= set(vote["votes"]) and self.transition_until - time.time() > VOTE_FAST:
+            self.transition_until = time.time() + VOTE_FAST
+        metrics.record("lyrics_vote", song=vote["id"], title=vote["title"], vote=value, why=why,
+                       singer=device == (self.singers.get(vote["singer"].casefold()) or {}).get("device"), needed=device in needed)
+        votes = list(vote["votes"].values())
+        return {"key": vote["key"], "at": round(vote["opened"]), "up": votes.count("up"), "down": votes.count("down"),
+                "why": {w: list(vote["why"].values()).count(w) for w in VOTE_WHY if w in vote["why"].values()}}
+
+    def save_vote(self, video_id, record):
+        """karaoke-server: keep each song's votes in its meta.json, tied to the lyrics they were about (lyrics.lrc)."""
+        if not self.path:
+            return
+        folder = self.path.parent / video_id
+        try:
+            meta = json.loads((folder / "meta.json").read_text(encoding="utf-8"))
+            lrc = (folder / "lyrics.lrc").read_text(encoding="utf-8")
+        except (OSError, ValueError):
+            return
+        import hashlib
+        record = {**record, "lyrics": hashlib.sha256(lrc.encode()).hexdigest()[:16]}
+        votes = [v for v in meta.get("lyrics_votes", []) if v.get("key") != record["key"]] + [record]
+        meta["lyrics_votes"] = votes[-50:]
+        temporary = folder / "meta.vote.tmp"
+        temporary.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(folder / "meta.json")
 
     def restore(self, path: Path, seed=lambda: {}):
         """Reload the saved queue; songs are prepared again (fast from cache) and the current one resumes."""
@@ -193,6 +279,10 @@ class State:
         if self.player is ws:
             self.player = None
             self.audio = False
+
+    def duration_sung(self):
+        """karaoke-server: seconds into the song on stage (position as last reported by the TV)."""
+        return float(self.position or 0)
 
     def advance(self, scored=False):
         self.current = None
@@ -392,6 +482,11 @@ class State:
             self.fun_allowed(message.get("device"), "shout")
             await self.show_fun("shout", name, text=text)
             return
+        if action == "lyrics_vote":
+            record = self.cast_vote(message)
+            self.save_vote(self.vote["id"], record)
+            await self.broadcast(persist=False)
+            return
         if action == "hide":
             # Any phone can take a shout-out or photo off the TV.
             if self.player is not None:
@@ -443,11 +538,14 @@ class State:
         elif action == "pause":
             self.playing = False
         elif action == "skip" or action == "ended":
+            ended, played = self.current, (self.duration_sung() if action == "skip" else float((self.current or {}).get("duration") or 0))
             if self.current:  # karaoke-server metric: finished or skipped, and how far in
                 metrics.record("song_played", song=self.current["id"], title=self.current["title"], singer=self.current.get("singer", ""),
                                completed=action == "ended", position=round(self.position), duration=round(self.current.get("duration") or 0),
                                speed=self.speed, key=self.key, vocal=round(self.vocal, 2))
             self.advance(scored=action == "ended")
+            if ended:
+                self.open_vote(ended, played)
         elif action == "undo":
             self.take_back()
         elif action == "audio":

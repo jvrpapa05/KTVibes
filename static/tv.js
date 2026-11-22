@@ -326,6 +326,14 @@ async function start(){
   if(token===generation&&e.name==='NotAllowedError'){music.pause();voice.pause();enabled=false;send({action:'audio',value:false});$('enable').hidden=false;$('audio-error').textContent='Tap Enable sound to resume playback.';}
  }finally{if(token===generation)starting=false;}
 }
+// karaoke-server: how the room voted on the last song's lyrics, while the countdown runs (phones cast the votes)
+function showTally(between){
+ const v=state.vote,tally=$('vote-tally');
+ if(!v||!between||(v.closes-(Date.now()/1000+serverSkew))<=0){tally.hidden=true;return;}
+ const parts=[`Lyrics in sync? <b>👍 ${v.up}</b> · <b>👎 ${v.down}</b>`];
+ if(v.needed)parts.push(`${v.voted_needed} of ${v.needed} singers voted`);
+ const html=parts.join(' · ');if(tally.innerHTML!==html)tally.innerHTML=html;tally.hidden=false;
+}
 const COUNT_IN=4;  // seconds before the first line that the lyrics appear
 function frame(now){
  if(state){
@@ -337,6 +345,7 @@ function frame(now){
    const left=Math.max(0,state.transition_until-(Date.now()/1000+serverSkew));breather=Math.max(breather,left);
    $('countdown-ring').style.strokeDashoffset=(100*(1-left/breather)).toFixed(2);const seconds=String(Math.ceil(left));if($('countdown').textContent!==seconds)$('countdown').textContent=seconds;if($('board-go'))$('board-go').textContent=seconds.padStart(2,'0');
   }else breather=0;
+  showTally(!state.current||waiting);
   if(!state.current||waiting)document.body.classList.remove('intro');
   document.body.classList.toggle('between',!!waiting);
   video.hidden=!showVideo()||!!waiting||!!video.error;

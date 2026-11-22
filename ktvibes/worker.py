@@ -109,6 +109,17 @@ def timed_lyrics(folder: Path, raw: str, samples_path: Path, lines: list[dict], 
 # the one that starts with the singer is kept.
 ENTRY_LIMIT = 3.0
 
+def vote_verdict(folder: Path, meta: dict) -> str | None:
+    """karaoke-server: what the room said about these lyrics (queue.State.cast_vote): "confirmed" (2+ in sync, more than
+    not), "flagged" (2+ not in sync, more than in sync) or None. Only votes about the current lyrics.lrc count."""
+    try:
+        lrc = (folder / "lyrics.lrc").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    mine = [v for v in meta.get("lyrics_votes", []) if v.get("lyrics") == hashlib.sha256(lrc.encode()).hexdigest()[:16]]
+    up, down = sum(v.get("up", 0) for v in mine), sum(v.get("down", 0) for v in mine)
+    return "flagged" if down >= 2 and down > up else "confirmed" if up >= 2 and up > down else None
+
 async def better_timing(folder: Path, raw: str, identity: list, duration: float, meta: dict):
     """(raw, lines) of another LRCLIB timing that starts with the singer, or None."""
     try:
@@ -117,9 +128,13 @@ async def better_timing(folder: Path, raw: str, identity: list, duration: float,
         return None
     tried_key = hashlib.sha256(raw.encode()).hexdigest()[:16]
     # a version someone picked on the remote stays; each timing is looked at once
-    if entry is None or abs(entry) <= ENTRY_LIMIT or not raw or meta.get("lyrics_chosen") or meta.get("timings_tried") == tried_key:
+    verdict = vote_verdict(folder, meta)  # the room's votes outrank the start detector
+    tried_key += ":" + (verdict or "")
+    off = verdict == "flagged" or (entry is not None and abs(entry) > ENTRY_LIMIT)
+    if not off or verdict == "confirmed" or not raw or meta.get("lyrics_chosen") or meta.get("timings_tried") == tried_key:
         return None
     meta["timings_tried"] = tried_key
+    entry = entry or 0.0
     first = lambda text: (lyrics.span({"syncedLyrics": text}) or (None,))[0]
     now = first(raw)
     try:
@@ -155,7 +170,7 @@ async def better_timing(folder: Path, raw: str, identity: list, duration: float,
         lines = await asyncio.to_thread(timed_lyrics, trial, text, stems.path(folder, "vocals"), lyrics.parse_lrc(text), c.get("length"))
         tried = json.loads((trial / "timed.json").read_text(encoding="utf-8")).get("entry_error")
         log.info("Lyrics for %s: first line %+.1fs from the singer; LRCLIB %s gives %s", folder.name, entry, c.get("id"), tried)
-        if tried is not None and abs(tried) < best[0] - 1:
+        if tried is not None and (abs(tried) < best[0] - 1 or (verdict == "flagged" and abs(tried) <= ENTRY_LIMIT and best[1] is None)):
             best = (abs(tried), text, lines, c)
             (trial / "timed.json").replace(folder / "timed.json")
     if trial.exists():
@@ -166,7 +181,7 @@ async def better_timing(folder: Path, raw: str, identity: list, duration: float,
         return None
     (folder / "lyrics.lrc").write_text(best[1], encoding="utf-8")
     meta["lyrics_duration"] = best[3].get("length") or best[3].get("duration")
-    meta["timings_tried"] = hashlib.sha256(best[1].encode()).hexdigest()[:16]
+    meta["timings_tried"] = hashlib.sha256(best[1].encode()).hexdigest()[:16] + ":"
     meta.pop("lyric_offset", None)
     return best[1], best[2]
 

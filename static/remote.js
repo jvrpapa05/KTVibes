@@ -34,10 +34,41 @@ function render(next){
  }
  // The header pill reports the TV, since that decides whether anything can play.
  $('connection').textContent=!state.player_connected?'TV not connected':state.player_audio?'TV ready':'TV connected · tap Enable sound on it';  // karaoke-server: says it's about the TV, not this phone$('connection').classList.toggle('warn',!state.player_audio);$('connection').classList.toggle('off',!state.player_connected);
+ showVote();
  document.body.dataset.theme=state.theme||'default';showNow(!before);showControls(before);showQueue(before);showClassic();classicUi?.render(state);
  const ready=[state.current,...state.upcoming].filter(i=>i?.status==='ready').map(i=>i.key).join();
  if(ready!==readyKeys){readyKeys=ready;loadRecent();classicUi?.loadBook();}
 }
+// karaoke-server: "Were the lyrics in sync?" after each song (user, 2026-11-22). Everyone votes; the countdown on the
+// TV shortens once every singer with a song in the queue has. This phone remembers its own vote for that song.
+const VOTE_KEY='karaoke.vote';
+const myVote=()=>{try{return JSON.parse(localStorage.getItem(VOTE_KEY)||'null')||{};}catch{return {};}};
+let voteDismissed='',voteHideTimer;
+function showVote(){
+ const v=state.vote,box=$('vote');
+ const open=v&&(v.closes-(Date.now()/1000+skew))>0&&voteDismissed!==v.key;
+ if(!open){box.hidden=true;return;}
+ const mine=myVote(),voted=mine.key===v.key?mine:null;
+ box.hidden=false;
+ $('vote-song').textContent=`${v.title} · ${v.artist}`;
+ $('vote-up').classList.toggle('on',voted?.value==='up');$('vote-down').classList.toggle('on',voted?.value==='down');
+ $('vote-why').hidden=voted?.value!=='down';
+ document.querySelectorAll('#vote-why [data-why]').forEach(b=>b.classList.toggle('on',voted?.why===b.dataset.why));
+ $('vote-thanks').hidden=!voted;
+ $('vote-thanks').textContent=voted?`Thanks! ${v.needed?`${v.voted_needed} of ${v.needed} singers voted`:''}`.trim():'';
+}
+function castVote(value,why){
+ const v=state?.vote;if(!v)return;
+ const mine={key:v.key,value,why:value==='down'?why||null:null};
+ try{localStorage.setItem(VOTE_KEY,JSON.stringify(mine));}catch{}
+ sendRaw({action:'lyrics_vote',key:v.key,value,why:mine.why||undefined,device:deviceId()});haptic(8);showVote();
+ clearTimeout(voteHideTimer);
+ if(value==='up'||why)voteHideTimer=setTimeout(()=>{voteDismissed=v.key;showVote();},2500);
+}
+document.querySelectorAll('#vote [data-vote]').forEach(b=>b.addEventListener('click',()=>castVote(b.dataset.vote)));
+document.querySelectorAll('#vote [data-why]').forEach(b=>b.addEventListener('click',()=>castVote('down',b.dataset.why)));
+$('vote-close').addEventListener('click',()=>{voteDismissed=state?.vote?.key||'';showVote();});
+setInterval(()=>{if(state&&!$('vote').hidden)showVote();},1000);
 // Now playing: a card at the top, handing over to the dock once scrolled away.
 function showNow(first){
  const c=state.current,art=c?thumbnail(c.id):'';placeFun(!!c);

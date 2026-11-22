@@ -104,6 +104,47 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         await state.control({'action': 'guide', 'value': 'cycle'})
         self.assertEqual(state.guide, 'latin')
 
+    async def test_lyrics_vote_after_each_song(self):
+        # karaoke-server (user, 2026-11-22): everyone votes "lyrics in sync?"; the countdown is 10 s and drops to 3 s
+        # once every singer with a song in the queue has voted
+        import time, json, tempfile
+        from pathlib import Path
+        from ktvibes import queue
+        state = State()
+        folder = tempfile.TemporaryDirectory(); self.addCleanup(folder.cleanup)
+        state.path = Path(folder.name) / 'queue.json'
+        (Path(folder.name) / 'abcdefghijk').mkdir()
+        (Path(folder.name) / 'abcdefghijk' / 'meta.json').write_text('{"artist": "A", "title": "First"}')
+        (Path(folder.name) / 'abcdefghijk' / 'lyrics.lrc').write_text('[00:01.00]a')
+        state.claim_singer('Ana', 'phone-ana-1'); state.claim_singer('Ben', 'phone-ben-1')
+        first = await state.add('abcdefghijk', 'A', 'First', 'Ana')
+        second = await state.add('bbbbbbbbbbb', 'B', 'Second', 'Ben')
+        for item in (first, second):
+            item['status'], item['duration'], item['lyrics'] = 'ready', 200, [{'t': 1, 'text': 'a'}]
+        state.promote()
+        state.position = 120
+        await state.control({'action': 'skip'})
+        vote = state.snapshot()['vote']
+        self.assertEqual((vote['title'], vote['needed'], vote['voted_needed']), ('First', 2, 0))
+        self.assertAlmostEqual(state.transition_until - time.time(), queue.VOTE_WAIT, delta=1)
+        await state.control({'action': 'lyrics_vote', 'key': first['key'], 'value': 'down', 'why': 'late', 'device': 'phone-ana-1'})
+        await state.control({'action': 'lyrics_vote', 'key': first['key'], 'value': 'up', 'device': 'someone-else'})  # anyone may vote
+        self.assertGreater(state.transition_until - time.time(), queue.VOTE_FAST + 1)  # still waiting for Ben
+        await state.control({'action': 'lyrics_vote', 'key': first['key'], 'value': 'down', 'device': 'phone-ben-1'})
+        self.assertLessEqual(state.transition_until - time.time(), queue.VOTE_FAST)
+        vote = state.snapshot()['vote']
+        self.assertEqual((vote['up'], vote['down'], vote['voted_needed']), (1, 2, 2))
+        saved = json.loads((Path(folder.name) / 'abcdefghijk' / 'meta.json').read_text())['lyrics_votes']
+        self.assertEqual((saved[0]['up'], saved[0]['down'], saved[0]['why']), (1, 2, {'late': 1}))
+        from ktvibes import worker
+        self.assertEqual(worker.vote_verdict(Path(folder.name) / 'abcdefghijk', {'lyrics_votes': saved}), 'flagged')
+        with self.assertRaises(ValueError):
+            await state.control({'action': 'lyrics_vote', 'key': 'old', 'value': 'up', 'device': 'phone-ana-1'})
+        # a song skipped early isn't asked about
+        state.position = 5
+        await state.control({'action': 'skip'})
+        self.assertIsNone(state.snapshot()['vote'])
+
     async def test_breather_only_between_songs(self):
         import time
         state = State()

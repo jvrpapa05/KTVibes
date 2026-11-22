@@ -233,3 +233,7 @@ body.still :is(.tv-tools,.tv-bottom,.open-remote){opacity:0;pointer-events:none}
 .corner-join .cj-label{font-size:clamp(12px,.95vw,18px);font-weight:600;letter-spacing:.02em;transition:opacity .7s,font-size .7s}
 .corner-join.small img{width:clamp(48px,3.6vw,76px);padding:3px;border-radius:8px;opacity:.6}
 .corner-join.small .cj-label{font-size:clamp(10px,.75vw,14px);opacity:.6}
+
+/* karaoke-server: the room's "lyrics in sync?" votes for the song that just ended, under the countdown */
+.vote-tally{position:fixed;left:50%;bottom:4vh;z-index:30;transform:translateX(-50%);margin:0;padding:.55em 1.2em;border-radius:999px;background:#000000a8;font-size:clamp(16px,1.6vw,28px);color:#ffffffd0;letter-spacing:.01em;font-variant-numeric:tabular-nums;white-space:nowrap}
+.vote-tally b{color:#fff;font-weight:700}
