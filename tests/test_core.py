@@ -117,6 +117,12 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([state.current['singer'], b['singer'], c['singer']], ['Vincent', 'Ana', 'Vincent'])
         self.assertEqual(state.profiles.get('vincent'), {'key': 2})
         self.assertNotIn('vince', state.singers)
+        # the phone's old name was freed meanwhile (idle, or renamed on an older version): its songs still follow it
+        d = await state.add('ddddddddddd', 'D', 'Fourth', 'Vincent', 'phone-vince-1')
+        state.singers.pop('vincent')
+        state.claim_singer('John', 'phone-vince-1')
+        self.assertEqual(d['singer'], 'John')
+        self.assertEqual(b['singer'], 'Ana')
 
     async def test_lyrics_vote_after_each_song(self):
         # karaoke-server (user, 2026-11-22): everyone votes "lyrics in sync?"; the countdown is 10 s and drops to 3 s

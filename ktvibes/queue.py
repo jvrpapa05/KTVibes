@@ -113,6 +113,7 @@ class State:
         self.lyrics_sent = {}  # TV socket -> key of the song whose lyrics it already has
         self.lyrics_applying = {}  # karaoke-server: song id -> {"version", "started"} while new lyrics are timed in the background
         self.vote = None  # karaoke-server: the open "lyrics in sync?" vote (see VOTE_WAIT)
+        self.owners = {}  # karaoke-server: queue item key -> device of the phone that queued it (never sent to phones)
 
     def guides(self):
         """Guide modes with something to show for the current song (all of them when idle)."""
@@ -230,6 +231,8 @@ class State:
             entries = [saved["current"], *entries]
         for entry in entries:
             item = self.entry(entry["id"], entry["artist"], entry["title"], entry.get("singer", ""))
+            if entry.get("device"):
+                self.owners[item["key"]] = entry["device"]
             if entry is saved.get("current"):
                 item["resume"] = float(entry.get("position") or 0)
             self.upcoming.append(item)
@@ -238,7 +241,7 @@ class State:
     def save(self):
         if self.path is None:
             return
-        brief = lambda i: {"id": i["id"], "artist": i["artist"], "title": i["title"], "singer": i.get("singer", "")}
+        brief = lambda i: {"id": i["id"], "artist": i["artist"], "title": i["title"], "singer": i.get("singer", ""), "device": self.owners.get(i["key"], "")}
         data = {"current": self.current and {**brief(self.current), "position": self.position},
                 "upcoming": [brief(i) for i in self.upcoming if i["status"] != "error"], "played": self.played,
                 "theme": self.theme, "room_ends": self.room_ends, "singers": self.singers, "profiles": self.profiles}
@@ -381,23 +384,27 @@ class State:
         old = next((v["name"] for k, v in self.singers.items() if v["device"] == device and k != key), None)
         self.singers = {k: v for k, v in self.singers.items() if v["device"] != device or k == key}
         self.singers[key] = {"name": name, "device": device, "seen": now}
-        if old:
-            self.rename_singer(old, name)
+        self.rename_singer(old, name, device)
         return name
 
-    def rename_singer(self, old, new):
+    def rename_singer(self, old, new, device=""):
         """karaoke-server (beta 2026-11-22): a phone that changes its name takes its songs on stage and in the queue,
         and its saved settings, along to the new name, so the TV shows it right away."""
+        live = {i["key"] for i in (self.current, *self.upcoming) if i}
+        self.owners = {k: v for k, v in self.owners.items() if k in live}
         for item in (self.current, *self.upcoming):
-            if item and str(item.get("singer") or "").casefold() == old.casefold():
+            mine = device and self.owners.get(item["key"]) == device if item else False  # even if the old name was freed
+            if item and item.get("singer") and (mine or (old and str(item["singer"]).casefold() == old.casefold())):
                 item["singer"] = new
-        if old.casefold() in self.profiles and new.casefold() not in self.profiles:
+        if old and old.casefold() in self.profiles and new.casefold() not in self.profiles:
             self.profiles[new.casefold()] = self.profiles.pop(old.casefold())
 
-    async def add(self, video_id, artist, title, singer=""):
+    async def add(self, video_id, artist, title, singer="", device=""):
         if self.queued(video_id):
             raise ValueError("That song is already in the queue")
         item = self.entry(video_id, artist, title, singer)
+        if device:
+            self.owners[item["key"]] = device
         self.upcoming.append(item)
         self.wake.set()
         await self.broadcast()
