@@ -504,14 +504,25 @@ function swipeable(row,song){
  };
  return wrap;
 }
+// karaoke-server (user, 2026-11-22): while a search runs, say so in words with a spinner (placeholder boxes alone
+// read as "nothing"), and say more as the wait grows, since checking lyrics can take a few seconds.
+const SEARCH_STEPS=[[0,'Looking for your song…'],[3000,'Checking which versions have lyrics…'],[8000,'Still checking… the lyrics service is slow right now']];
+let searchWaitTimers=[];
+function searchWaiting(run){
+ searchWaitTimers.forEach(clearTimeout);searchWaitTimers=[];
+ const note=el('p',undefined,'search-wait');note.setAttribute('role','status');const spin=el('span',undefined,'spinner');spin.setAttribute('aria-hidden','true');const text=el('span',SEARCH_STEPS[0][1]);note.append(spin,text);
+ SEARCH_STEPS.slice(1).forEach(([ms,words])=>searchWaitTimers.push(setTimeout(()=>{if(run===searchRun)text.textContent=words;},ms)));
+ return note;
+}
 async function loadPage(){
  const run=++searchRun,first=!search.page;
- $('more').disabled=true;if(first){$('results').dataset.state='loading';$('results-end').hidden=true;}
- // Placeholder rows hold the space while YouTube answers.
- if(first)$('results').replaceChildren(...Array.from({length:5},()=>{const row=el('div',undefined,'skeleton');row.setAttribute('aria-hidden','true');row.innerHTML='<i></i><div><i></i><i></i></div>';return row;}));
+ $('more').disabled=true;if(first){$('results').dataset.state='loading';$('results-end').hidden=true;}else $('more').textContent='Looking for more…';
+ // Placeholder rows hold the space while YouTube answers, under a line that says what's happening.
+ if(first)$('results').replaceChildren(searchWaiting(run),...Array.from({length:3},()=>{const row=el('div',undefined,'skeleton');row.setAttribute('aria-hidden','true');row.innerHTML='<i></i><div><i></i><i></i></div>';return row;}));
  try{
   const results=(await api(`/api/search?q=${encodeURIComponent(search.query)}&page=${search.page}`)).filter(s=>!search.seen.has(s.id));
   if(run!==searchRun)return;
+  searchWaitTimers.forEach(clearTimeout);
   if(first)$('results').replaceChildren();
   // karaoke-server: every version listed has lyrics that line up with it (only those come back)
   if(first&&results.length)$('results').append(el('p','✓ Every version here has lyrics that line up','playable-note'));
@@ -522,7 +533,7 @@ async function loadPage(){
   if(!search.seen.size&&!$('results').querySelector('.empty'))$('results').append(emptyNote('없음','검색 결과가 없어요','No karaoke-ready version yet. Only versions whose lyrics line up are shown: add the artist, check the spelling, or tap More results.'));
   if(search.seen.size)$('results').querySelector('.empty')?.remove();
   if(first)showResults();
- }catch(error){if(run!==searchRun)return;if(first){$('results').replaceChildren();$('results').dataset.state='';}toast(error.message,undefined,'err');}finally{$('more').disabled=false;}
+ }catch(error){if(run!==searchRun)return;searchWaitTimers.forEach(clearTimeout);if(first){$('results').replaceChildren();$('results').dataset.state='';}toast(error.message,undefined,'err');}finally{$('more').disabled=false;$('more').textContent='More results';}
 }
 // Autocomplete from YouTube's search box: type to see completions, tap or arrow+Enter to search one.
 let suggestTimer,suggestRun=0,suggestIndex=-1;

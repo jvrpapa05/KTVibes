@@ -346,3 +346,8 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
 .vote-scrim{position:fixed;inset:0;z-index:44;background:#0b0d0cc7;backdrop-filter:blur(3px)}
 .hello{display:block;max-width:62%;text-align:left;padding:6px 0;background:none;color:var(--ink);font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hello b{color:var(--lime);text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:3px;overflow:hidden;text-overflow:ellipsis}
+/* karaoke-server: "Looking for your song…" while a search runs */
+.search-wait{display:flex;align-items:center;justify-content:center;gap:10px;margin:6px 0 10px;color:var(--ink);font-size:15px;font-weight:600;text-align:center}
+.spinner{flex:none;width:18px;height:18px;border-radius:50%;border:2.5px solid #ffffff2a;border-top-color:var(--lime);animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spinner{animation-duration:2.5s}}
