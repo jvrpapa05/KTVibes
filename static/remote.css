@@ -351,3 +351,8 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
 .spinner{flex:none;width:18px;height:18px;border-radius:50%;border:2.5px solid #ffffff2a;border-top-color:var(--lime);animation:spin .9s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.spinner{animation-duration:2.5s}}
+/* karaoke-server: lyric size, tapped up and down */
+.size-step{display:flex;align-items:center;gap:6px}
+.size-step button{width:44px;height:40px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);color:var(--ink);font-size:22px;font-weight:700;line-height:1}
+.size-step button:disabled{opacity:.35}
+.size-step b{min-width:3.6em;text-align:center;font-variant-numeric:tabular-nums}

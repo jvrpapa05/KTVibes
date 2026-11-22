@@ -500,7 +500,7 @@ class State:
             # jumps, drift, browser), so video lag can be traced. One log line; nothing else changes.
             value = message.get("value")
             if sender is self.player and isinstance(value, dict):
-                keep = {k: value[k] for k in ("song", "height", "dropped", "frames", "waits", "jumps", "max_drift", "agent") if k in value}
+                keep = {k: value[k] for k in ("song", "scenery", "height", "dropped", "frames", "waits", "jumps", "max_drift", "agent") if k in value}
                 logging.getLogger("uvicorn.error").info("TV playback %s", json.dumps(keep, ensure_ascii=False)[:600])
                 metrics.record("tv_playback", **keep)
             return

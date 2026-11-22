@@ -588,12 +588,14 @@ const tvStats={jumps:0,waits:0,maxDrift:0};
 video.addEventListener('waiting',()=>{if(!video.paused)tvStats.waits++;});
 let lastFrames={dropped:0,total:0};
 setInterval(()=>{
- if(!state?.current||video.paused||video.hidden||!video.videoHeight)return;
- const q=video.getVideoPlaybackQuality?.()||{droppedVideoFrames:0,totalVideoFrames:0};
+ // karaoke-server: whichever video is showing: the song's own, or scenery instead of a lyric video
+ const shown=!scenery.hidden?scenery:video;
+ if(!state?.current||shown.paused||shown.hidden||!shown.videoHeight)return;
+ const q=shown.getVideoPlaybackQuality?.()||{droppedVideoFrames:0,totalVideoFrames:0};
  const dropped=q.droppedVideoFrames-lastFrames.dropped,total=q.totalVideoFrames-lastFrames.total;lastFrames={dropped:q.droppedVideoFrames,total:q.totalVideoFrames};
  // karaoke-server: a new video source restarts the browser's counters; skip that window instead of reporting nonsense
  if(dropped<0||total<0){tvStats.jumps=0;tvStats.waits=0;tvStats.maxDrift=0;return;}
- send({action:'tv_stats',value:{song:state.current.id,height:video.videoHeight,dropped,frames:total,waits:tvStats.waits,jumps:tvStats.jumps,max_drift:Math.round(tvStats.maxDrift*1000),agent:navigator.userAgent.slice(0,160)}});
+ send({action:'tv_stats',value:{song:state.current.id,scenery:shown===scenery,height:shown.videoHeight,dropped,frames:total,waits:tvStats.waits,jumps:tvStats.jumps,max_drift:Math.round(tvStats.maxDrift*1000),agent:navigator.userAgent.slice(0,160)}});
  tvStats.jumps=0;tvStats.waits=0;tvStats.maxDrift=0;
 },30000);
 

@@ -140,16 +140,17 @@ let shownKey=null;
 function showControls(before){
  if(state.version)$('app-version').textContent=`v${state.version}`;
  const v=view();$('sheet-scope').textContent=editingOwn()?`Your settings · used when ${singer()}'s songs play`:'Changes show on the device';
- for(const id of ['skip','earlier','later','lyric-version','scrub','key-down','key-up'])$(id).disabled=!state.current;
+ for(const id of ['skip','scrub','key-down','key-up'])$(id).disabled=!state.current;
  $('scrub').max=state.current?.duration||1;
- for(const [id,value] of [['vocal',v.vocal],['music',v.music],['speed',v.speed],['lyric-scale',v.lyric_scale]]){
+ for(const [id,value] of [['vocal',v.vocal],['music',v.music],['speed',v.speed]]){
   if(document.activeElement!==$(id)&&!gliding)$(id).value=value;$(`${id}-value`).textContent=`${Math.round(value*100)}%`;
  }
  for(const b of document.querySelectorAll('.presets button'))b.setAttribute('aria-pressed',Math.abs(b.dataset.vocal-v.vocal)<.005&&Math.abs(b.dataset.music-v.music)<.005);
  if(editingOwn())$('key-down').disabled=$('key-up').disabled=false;  // your key can be set before your song
  $('key-down').disabled||=v.key<=-6;$('key-up').disabled||=v.key>=6;
  if(v.key!==shownKey){rollKey(v.key,shownKey===null?0:v.key-shownKey);shownKey=v.key;}
- $('offset-value').textContent=`${state.offset>=0?'+':''}${state.offset.toFixed(1)}s`;
+ // karaoke-server: lyric size is tapped up and down in 10% steps (user, 2026-11-22: easier than a slider)
+ $('lyric-scale-value').textContent=`${Math.round(v.lyric_scale*100)}%`;$('size-down').disabled=v.lyric_scale<=0.6+1e-9;$('size-up').disabled=v.lyric_scale>=2.5-1e-9;
  for(const seg of SEGMENTED){
   for(const b of seg.querySelectorAll('button')){b.setAttribute('aria-pressed',b.dataset.value===v[seg.dataset.action]);if(seg.dataset.action==='guide')b.hidden=!(state.guides||[]).includes(b.dataset.value);}
   if(document.body.classList.contains('sheet-open')||state.theme==='classic')placePill(seg);  // openSheet measures the rest; in Classic the settings are a page
@@ -171,7 +172,7 @@ function rollKey(key,direction){
 $('key-down').onclick=()=>{haptic(8);send({action:'key',value:view().key-1});};
 $('key-up').onclick=()=>{haptic(8);send({action:'key',value:view().key+1});};
 $('key-reset').onclick=()=>{send({action:'speed',value:1});send({action:'key',value:0});};
-for(const [id,action] of [['vocal','vocal'],['music','music'],['speed','speed'],['lyric-scale','lyric_scale']]){const sendValue=throttle(value=>send({action,value}));$(id).oninput=()=>sendValue(Number($(id).value));}
+for(const [id,action] of [['vocal','vocal'],['music','music'],['speed','speed']]){const sendValue=throttle(value=>send({action,value}));$(id).oninput=()=>sendValue(Number($(id).value));}
 // Presets set both sliders, gliding there so the change is visible; A cappella is the singer alone.
 let gliding=false;
 for(const b of document.querySelectorAll('.presets button'))b.onclick=()=>{
@@ -199,8 +200,9 @@ for(const seg of SEGMENTED)seg.onclick=e=>{const b=e.target.closest('button');if
 // A control measured while hidden (the Classic settings tab, a closed sheet) gets its pill once it has a size.
 addEventListener('resize',()=>SEGMENTED.forEach(placePill));
 {const sized=new ResizeObserver(entries=>entries.forEach(entry=>placePill(entry.target)));SEGMENTED.forEach(seg=>sized.observe(seg));}
-$('earlier').onclick=()=>send({action:'offset',delta:-0.5});$('later').onclick=()=>send({action:'offset',delta:0.5});
-$('lyric-version').onclick=()=>state?.current&&pickLyrics(state.current);
+// karaoke-server: the Fix lyrics section is gone (user, 2026-11-22: "the party is for fun"); votes catch bad lyrics now
+const sizeStep=delta=>{const now=view()?.lyric_scale??1.5;haptic(6);send({action:'lyric_scale',value:Math.round(Math.max(0.6,Math.min(2.5,now+delta))*10)/10});};
+$('size-down').onclick=()=>sizeStep(-0.1);$('size-up').onclick=()=>sizeStep(0.1);
 function openSheet(){document.body.classList.add('sheet-open');$('sheet').inert=false;haptic(8);requestAnimationFrame(()=>SEGMENTED.forEach(placePill));}
 function closeSheet(){document.body.classList.remove('sheet-open');$('sheet').inert=true;}
 $('open-controls').onclick=$('dock-now').onclick=$('dock-settings').onclick=()=>document.body.dataset.theme==='classic'?classicUi.setTab('settings'):openSheet();
@@ -472,7 +474,7 @@ function songMenu(wrap,song,del){
  menu.setAttribute('role','menu');for(const item of [refetch,remove])item.setAttribute('role','menuitem');
  refetch.onclick=()=>{closeMenu();pickLyrics(song);};
  remove.onclick=()=>{closeMenu();del.click();};
- menu.append(label,refetch,remove);wrap.append(menu);openMenu=menu;refetch.focus();
+ menu.append(label,remove);wrap.append(menu);openMenu=menu;remove.focus();  // karaoke-server: no "Lyrics…" (2026-11-22: guests don't fix lyrics; votes do)
 }
 function swipeable(row,song){
  const wrap=el('div',undefined,'swipe'),del=el('button','Delete','swipe-delete'),more=el('button','⋯','song-more');del.setAttribute('aria-label',`Delete ${song.title} from this device`);
