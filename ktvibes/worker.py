@@ -128,11 +128,21 @@ async def better_timing(folder: Path, raw: str, identity: list, duration: float,
         log.exception("Other lyric timings unavailable for %s", folder.name)
         return None
     lyrics.real_lengths([c for c in found if c.get("syncedLyrics")])
+    # The start detector can be fooled by humming or a chant before the first line ("Anong Daratnan": 11.5 s, yet
+    # fine), so another timing is used only when more LRCLIB records agree on its start than on the current one's.
+    try:  # every record of the song, not only the distinct candidates
+        async with lyrics.lrclib() as client:
+            every = (await client.get("/api/search", params={"artist_name": identity[0], "track_name": identity[1]})).json()
+    except Exception:
+        every = []
+    starts = [first(c.get("syncedLyrics") or "") for c in list(every) + found if c.get("syncedLyrics")]
+    backing = lambda start: sum(x is not None and abs(x - start) <= 1.0 for x in starts)
     seen, options = {raw}, []
     for c in found:
         text = c.get("syncedLyrics") or ""
         start = first(text)
-        if text in seen or start is None or now is None or abs(start - now) < 1.5 or not lyrics.fits(c, duration):
+        if text in seen or start is None or now is None or abs(start - now) < 1.5 or not lyrics.fits(c, duration) \
+                or backing(start) <= backing(now):
             continue
         seen.add(text)
         options.append((abs(start - (now - entry)), c))  # closest to where the singer really starts, first
