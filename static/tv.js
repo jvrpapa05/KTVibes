@@ -111,10 +111,15 @@ let lyricsRev=0,songLyrics=[],splitDone=false,slots=[],counting=null,still=false
 const sceneryNow=()=>state?.current?.scenery&&state.lyric_video==='scenery'&&state.video_mode!=='hide'?state.current.scenery:null;
 const showVideo=()=>!!state?.current?.video&&state.video_mode!=='hide'&&!sceneryNow();
 const scenery=document.getElementById('scenery');
+// karaoke-server (user, 2026-11-22: "use 1080p, then when the tv reports that it cannot do it then dynamically change
+// to 720p"): the scenery starts in 1080p; a TV that drops more than 10% of its frames over ~4 s switches to the 720p
+// copy at the same spot and remembers it, so the song's audio doesn't stutter while the screen struggles.
+const SCENERY_LITE='karaoke.sceneryLite';
+let sceneryLite=(()=>{try{return localStorage.getItem(SCENERY_LITE)==='1';}catch{return false;}})(),sceneryWatch=[];
 function showScenery(waiting){
  const sc=sceneryNow();
  if(!sc||waiting){if(!scenery.paused)scenery.pause();scenery.hidden=true;return false;}
- const src=`/scenery/${sc.file}`;
+ const src=`/scenery/${sceneryLite&&sc.lite?sc.lite:sc.file}`;
  if(scenery.dataset.src!==src){scenery.dataset.src=src;scenery.src=src;scenery.load();}
  const target=sc.start+(music.currentTime||0);
  if(scenery.readyState>=1&&Math.abs(scenery.currentTime-target)>2)scenery.currentTime=target;
@@ -645,6 +650,18 @@ const PREFER_30='karaoke.prefer30fps';
 const prefer30=()=>{try{return localStorage.getItem(PREFER_30)==='1';}catch{return false;}};
 let fpsWatch=null;
 function videoFile(item){return `/media/${item.id}/${item.video_30&&prefer30()?'video-30.mp4':'video.mp4'}`;}
+setInterval(()=>{
+ const sc=sceneryNow();
+ if(sceneryLite||!sc?.lite||scenery.hidden||scenery.paused||!scenery.getVideoPlaybackQuality){sceneryWatch=[];return;}
+ const q=scenery.getVideoPlaybackQuality();
+ sceneryWatch.push([q.droppedVideoFrames,q.totalVideoFrames]);if(sceneryWatch.length>5)sceneryWatch.shift();
+ const [d0,t0]=sceneryWatch[0],dropped=q.droppedVideoFrames-d0,total=q.totalVideoFrames-t0;
+ if(total<0){sceneryWatch=[];return;}  // a new source restarts the counters
+ if(total<90||dropped/total<=.1)return;
+ sceneryLite=true;sceneryWatch=[];try{localStorage.setItem(SCENERY_LITE,'1');}catch{}
+ console.info(`Scenery dropped ${Math.round(100*dropped/total)}% of frames: switched to the 720p copy`);
+ send({action:'tv_event',value:{kind:'scenery_lite',song:state.current.id,dropped_pct:Math.round(100*dropped/total)}});
+},1000);
 function watchFps(item){fpsWatch=item.video_30&&!prefer30()?{key:item.key,id:item.id,base:null}:null;}
 setInterval(()=>{
  const w=fpsWatch;if(!w||state?.current?.key!==w.key||video.paused||!video.getVideoPlaybackQuality)return;

@@ -458,7 +458,7 @@ async def claim_singer(singer: Singer):
 async def scenery_film(name: str):
     """karaoke-server: a scenery film for the TV (see scenery.py)."""
     path = CACHE / "scenery" / name
-    if not scenery.NAME.fullmatch(name) or not path.is_file():
+    if not scenery.SERVE.fullmatch(name) or not path.is_file():
         raise HTTPException(404, "No such scenery")
     return FileResponse(path, media_type="video/mp4")
 

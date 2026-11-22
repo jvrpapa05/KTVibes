@@ -705,6 +705,9 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         self.assertEqual(scenery.Scenery(Path(folder.name)).take(10) is not None, False)  # a fresh object with no films
         again = scenery.Scenery(Path(folder.name)); again.films = s.films
         self.assertGreater(again.take(50)["start"], got[4]["start"])       # the place is kept across restarts
+        (Path(folder.name) / "aaaaaaaaaaa.720.mp4").touch()                   # a lighter copy for TVs that drop frames
+        self.assertEqual(again.take(50).get("lite"), "aaaaaaaaaaa.720.mp4")
+        self.assertTrue(scenery.SERVE.fullmatch("aaaaaaaaaaa.720.mp4") and not scenery.NAME.fullmatch("aaaaaaaaaaa.720.mp4"))
 
     def test_accents_do_not_stop_a_match(self):
         # karaoke-server: 5,000-song study (2026-11-22): "GIVĒON - Heartbreak Anniversary (Official Music Video)" vs

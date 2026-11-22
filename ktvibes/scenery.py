@@ -12,7 +12,8 @@ import subprocess
 from pathlib import Path
 
 EDGE = 8.0
-NAME = re.compile(r"[A-Za-z0-9_-]{11}\.mp4")
+NAME = re.compile(r"[A-Za-z0-9_-]{11}\.mp4")  # a film (1080p)
+SERVE = re.compile(r"[A-Za-z0-9_-]{11}(\.720)?\.mp4")  # a film or its lighter 720p copy, for TVs that drop frames
 
 class Scenery:
     def __init__(self, folder: Path):
@@ -68,4 +69,5 @@ class Scenery:
                 logging.getLogger("uvicorn.error").info("Scenery: every film has been shown; starting over")
         state["next"] = {"file": name, "at": round(start + seconds + 1, 2)}
         self._save(state)
-        return {"file": name, "start": round(start, 2)}
+        lite = name.replace(".mp4", ".720.mp4")
+        return {"file": name, "start": round(start, 2), **({"lite": lite} if (self.folder / lite).is_file() else {})}
