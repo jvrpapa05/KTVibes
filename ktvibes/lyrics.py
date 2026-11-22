@@ -475,6 +475,11 @@ def real_lengths(records: list[dict]) -> None:
             groups.append({"first": s[0], "last": s[1], "members": [c]})
     for g in groups:
         typical = statistics.median(float(c["duration"]) for c in g["members"])
+        stated = [float(c["duration"]) for c in g["members"]]
+        if len(stated) > 1 and sum(abs(d - typical) <= 3 for d in stated) < 2:
+            # karaoke-server: no two labels agree near the middle ("Bakas Ng Talampakan": 246 and 462 s, a median
+            # of 354 s is neither): the label ending closest after the last line
+            typical = min(stated, key=lambda d: d - g["last"])
         for c in g["members"]:
             # one odd label in a group is corrected to the group's length; agreeing records keep their own
             c["length"] = float(c["duration"]) if abs(float(c["duration"]) - typical) <= 3 else typical

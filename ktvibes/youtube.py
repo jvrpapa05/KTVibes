@@ -70,11 +70,13 @@ LIVE = re.compile(r"\blive\b|live at|live session|\bconcert\b|\bunplugged\b"
                   r"\bfull performance\b|half ?time show", re.I)
 # Learned from our own library (2026-11-21): "Official HD Music Video", "Official Performance Video", a bare
 # "(Official)" and "(Music Video)" are official too; "(Roblox Music Video)" is not (only a bare bracket counts).
-OFFICIAL = re.compile(r"official\b[^()\[\]|]{0,25}?\bvideo\b|[\[(]\s*official\s*[\])]|[\[(]\s*music video\s*[\])]|\bm/?v\b|official mv|뮤직비디오", re.I)
+OFFICIAL = re.compile(r"(?<!un)official\b[^()\[\]|]{0,25}?\bvideo\b|[\[(]\s*official\s*[\])]|[\[(]\s*music video\s*[\])]|\bm/?v\b|official mv|뮤직비디오", re.I)
 
 def kind(title: str, channel: str = "", artist: str = "") -> str:
     """What sort of upload a search result is: official, lyric, audio, cover, live or other."""
     title, channel = title or "", channel or ""
+    if re.search(r"\bunofficial\b|\bfan[- ]?made\b|\bfanmade\b", title, re.I):  # karaoke-server: never the record's own video
+        return "cover" if COVER.search(title) else "lyric" if LYRIC.search(title) else "other"
     if COVER.search(title):
         return "cover"
     if LYRIC.search(title):
@@ -114,7 +116,11 @@ def fold(text: str) -> str:
 
 def song_name(title: str) -> str:
     """A song's name for matching versions: no "ft. X", "(Remastered)", "- From the film", case or punctuation."""
-    title = re.split(r"\s+(?:ft\.?|feat\.?|featuring|with)\s|[(\[]|\s-\s", fold(title or ""))[0]
+    folded = fold(title or "")
+    title = re.split(r"\s+(?:ft\.?|feat\.?|featuring|with)\s|[(\[]|\s-\s", folded)[0]
+    if not re.sub(r"\W+", "", title) and folded.lstrip().startswith("(") and not LABELS.search(folded.split(")")[0]):
+        # karaoke-server: a name that starts with brackets: "(Not) The One", "(I Can't Get No) Satisfaction"
+        title = re.split(r"\s+(?:ft\.?|feat\.?|featuring|with)\s|\s[(\[]|\s-\s", folded.strip())[0]
     return re.sub(r"\W+", "", title)
 
 def record_song(track: str, artist: str) -> str:
