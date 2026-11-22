@@ -107,7 +107,7 @@ def search(query: str, page: int = 0, size: int = 10) -> list[dict]:
 # karaoke-server: synced lyrics fit a video when it is as long as the recording they were timed to. Measured on
 # 1,000 top songs plus our library (research/search-1000 in the private repo): within a few seconds the first line
 # lands on the singer; a longer video (story intro, extra scene) puts every line early.
-LYRICS_TOLERANCE = 3.0
+LYRICS_TOLERANCE = 4.0  # karaoke-server: OPM study (2026-11-22): ±4 s cuts "nothing playable" 7.2% -> 5.6% with no wrong songs; videos 4-4.4 s longer timed fine (3 of 3)
 
 def fold(text: str) -> str:
     """karaoke-server: casefold without accents, so "GIVĒON" and "Giveon" (or "Beyoncé"/"Beyonce") compare equal."""
