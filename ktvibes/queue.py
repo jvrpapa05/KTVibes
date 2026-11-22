@@ -11,7 +11,7 @@ import uuid
 from . import songbook, metrics
 
 DISPLAY = {"video_mode": ("show", "blur", "hide"), "lyric_mode": ("two", "scroll", "off"), "theme": ("default",),
-           "lyric_video": ("scenery", "video")}  # karaoke-server: what plays on a lyric video's song (see scenery.py)  # karaoke-server: Classic theme removed (English-only users)
+           "lyric_video": ("scenery", "video")}  # karaoke-server: what plays on a lyric or audio video's song (see scenery.py)  # karaoke-server: Classic theme removed (English-only users)
 def following(options, current):
     """The option after `current`, wrapping round: what a "cycle" control switches to."""
     return options[(options.index(current) + 1) % len(options)]
@@ -91,7 +91,7 @@ class State:
         self.guide = "off"  # karaoke-server: pronunciation guides removed (English-only users); always off
         self.lyric_scale = 1.5
         self.video_mode = "show"  # show | blur | hide: blur suits lyric videos, whose own lyrics clash
-        self.lyric_video = "scenery"  # karaoke-server: scenery | video, for songs whose video is a lyric video
+        self.lyric_video = "scenery"  # karaoke-server: scenery | video, for songs whose video is a lyric video or audio upload
         self.scenery = None  # karaoke-server: scenery.Scenery, set at startup
         self.lyric_mode = "two"  # two (classic two-line KTV) | scroll | off
         self.theme = "default"  # default | classic (Korean noraebang look, with a room timer)
@@ -309,7 +309,7 @@ class State:
     def assign_scenery(self):
         """karaoke-server: a lyric video's song on stage gets its own stretch of scenery while the room wants it."""
         item = self.current
-        if item and item.get("lyric_video") and self.lyric_video == "scenery" and not item.get("scenery") and self.scenery:
+        if item and item.get("scenery_ok") and self.lyric_video == "scenery" and not item.get("scenery") and self.scenery:
             try:
                 item["scenery"] = self.scenery.take(float(item.get("duration") or 0) + 5)
             except Exception:

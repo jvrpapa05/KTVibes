@@ -378,7 +378,8 @@ async def run(state, cache: Path):
             # karaoke-server: a lyric video (its own words on screen) can be swapped for scenery on the TV
             # the kind search gave when it was queued (it saw the channel); otherwise read off the YouTube title
             item["kind"] = meta["kind"] = item.get("kind") or meta.get("kind") or youtube.kind(meta.get("source_title") or "")
-            item["lyric_video"] = item["kind"] == "lyric"
+            # scenery may replace a lyric video (its own words clash) or an audio upload (a still picture), user 2026-11-22
+            item["scenery_ok"] = item["kind"] in ("lyric", "audio")
             meta.update(duration=item["duration"], artist=item["artist"], title=item["title"])
             item["number"] = songbook.assign(cache, meta)
             save_meta(folder, meta)

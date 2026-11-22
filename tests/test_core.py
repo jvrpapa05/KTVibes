@@ -117,6 +117,18 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         await state.control({'action': 'pause', 'singer': 'Ana', 'device': 'someone-else-1'})  # not Ana's phone
         self.assertEqual(state.snapshot()['paused_by'], 'Someone')
 
+    async def test_scenery_for_lyric_and_audio_videos(self):
+        # karaoke-server (user, 2026-11-22): "for 'Audio' type we should also use scenery, similar to the Lyric video"
+        class Pool:
+            def take(self, seconds): return {"file": "aaaaaaaaaaa.mp4", "start": 8.0}
+        state = State(); state.scenery = Pool()
+        for vid, ok in (("abcdefghijk", True), ("bbbbbbbbbbb", False)):
+            item = await state.add(vid, 'A', 'T'); item.update(status='ready', duration=200, scenery_ok=ok)
+        state.promote()
+        self.assertEqual(state.current["scenery"]["file"], "aaaaaaaaaaa.mp4")   # a lyric or audio video
+        state.position = 5; await state.control({'action': 'skip'}); state.transition_until = 0; state.promote()
+        self.assertNotIn("scenery", state.current)                              # an official video keeps its own
+
     async def test_video_always_shows(self):
         # karaoke-server (user, 2026-11-22): "simplify the display ... remove blur and hide"
         state = State()
