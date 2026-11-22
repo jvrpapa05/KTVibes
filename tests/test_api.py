@@ -74,7 +74,7 @@ class APITests(unittest.TestCase):
             (folder / 'meta.json').write_text(json.dumps({'artist': '아이유', 'title': f'Song {index}'}), encoding='utf-8')
             if stems:
                 (folder / 'no_vocals.wav').touch()
-                (folder / 'vocals.wav').touch()
+                (folder / 'vocals.wav').touch(); (folder / 'timed.json').write_text('{"lines": [{"t": 1, "text": "a"}]}', encoding='utf-8')  # karaoke-server: singable
         # ddd is prepared but never played; ccc was played but its stems are gone.
         self.main.state.played = {'aaaaaaaaaaa': 1.0, 'bbbbbbbbbbb': 2.0, 'ccccccccccc': 3.0}
         songs = self.client.get('/api/recent').json()
@@ -90,7 +90,7 @@ class APITests(unittest.TestCase):
             meta = {'artist': '아이유', 'title': video_id, **({'number': number} if number else {})}
             (folder / 'meta.json').write_text(json.dumps(meta), encoding='utf-8')
             (folder / 'no_vocals.wav').touch()
-            (folder / 'vocals.wav').touch()
+            (folder / 'vocals.wav').touch(); (folder / 'timed.json').write_text('{"lines": [{"t": 1, "text": "a"}]}', encoding='utf-8')  # karaoke-server: singable
         songs = self.client.get('/api/songbook').json()
         self.assertEqual([(s['number'], s['id']) for s in songs], [(10001, 'bbbbbbbbbbb'), (10002, 'aaaaaaaaaaa')])
         self.assertIsInstance(songs[0]['prepared'], float)
@@ -102,7 +102,7 @@ class APITests(unittest.TestCase):
         folder.mkdir()
         (folder / 'meta.json').write_text(json.dumps({'artist': 'IU', 'title': 'Blueming'}), encoding='utf-8')
         (folder / 'no_vocals.flac').touch()
-        (folder / 'vocals.flac').touch()
+        (folder / 'vocals.flac').touch(); (folder / 'timed.json').write_text('{"lines": [{"t": 1, "text": "a"}]}', encoding='utf-8')  # karaoke-server: singable
         self.main.state.played = {'aaaaaaaaaaa': 1.0}
         self.assertEqual(len(self.client.get('/api/recent').json()), 1)
         self.assertEqual(self.client.delete('/api/songs/aaaaaaaaaaa').status_code, 200)
@@ -258,6 +258,17 @@ class APITests(unittest.TestCase):
             search.reset_mock()
             self.client.get('/api/search', params={'q': 'drake one dance'})
             self.assertEqual(search.call_count, 1)
+
+    def test_a_library_song_without_lyrics_cannot_be_queued(self):
+        # karaoke-server (beta 2026-11-22): "I thought we weren't able to queue a song that has no Lyrics?"
+        folder = Path(self.temp.name) / 'nnnnnnnnnnn'
+        folder.mkdir()
+        (folder / 'meta.json').write_text('{"artist": "La Mave", "title": "Dominga"}', encoding='utf-8')
+        for name in ('no_vocals.wav', 'vocals.wav'):
+            (folder / name).touch()
+        response = self.client.post('/api/queue', json={'id': 'nnnnnnnnnnn', 'artist': 'La Mave', 'title': 'Dominga'})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('lyrics', response.json()['detail'])
 
     def test_library_songs_are_offered_only_when_their_lyrics_line_up(self):
         # karaoke-server: same rule as search results; measured first-line error for prepared songs

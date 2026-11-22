@@ -533,6 +533,10 @@ async def candidates(artist: str, title: str, duration: float, hints: tuple[str,
         for params in searches:
             # A song can have several LRCLIB records: romanized, or another language's version.
             # Keep looking until one in the song's own script turns up.
+            # karaoke-server (beta 2026-11-22, "True Colors" film version): judge by real lengths, not labels. A record
+            # labelled with the video's length but timed to the 244 s album stopped the search here, then the real
+            # length threw it out and nothing was left ("No lyrics found", though five film-version records fit).
+            real_lengths(found)
             if not exhaustive and any(map(good, found)):
                 break
             # LRCLIB intermittently returns 5xx; retry, then move on to the next variant.
@@ -561,6 +565,8 @@ async def candidates(artist: str, title: str, duration: float, hints: tuple[str,
 
 async def fetch(artist: str, title: str, duration: float, hints: tuple[str, ...] = ()) -> dict:
     matches = await candidates(artist, title, duration, hints)
+    if not matches:  # karaoke-server: one more, thorough look before saying there are none
+        matches = await candidates(artist, title, duration, hints, exhaustive=True)
     if matches:
         # karaoke-server (beta report 2026-11-22, TJ Monterde "Palagi"): the first lookup asks for a record of the
         # video's length and can stop at a mislabelled one (album timing labelled 238 s, the video's length; the album

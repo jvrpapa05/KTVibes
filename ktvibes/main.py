@@ -273,13 +273,14 @@ def library_matches(q: str, limit: int = 3) -> list[dict]:
 async def recent(limit: int = Query(20, ge=1, le=50)):
     """Songs that went on stage, most recent first, so the remote can re-queue them without a search."""
     songs = prepared_songs()
-    played = sorted((when, video_id) for video_id, when in state.played.items() if video_id in songs)
+    # karaoke-server: only songs that can be sung (lyrics that line up), like search
+    played = sorted((when, video_id) for video_id, when in state.played.items() if video_id in songs and lines_up(video_id))
     return [{k: v for k, v in songs[video_id].items() if k != "prepared"} for _, video_id in reversed(played[-limit:])]
 
 @app.get("/api/songbook")
 async def songbook_list():
     """Prepared songs by songbook number, for the remote's keypad and songbook (with when each was prepared, for 신곡)."""
-    return sorted((s for s in prepared_songs().values() if s.get("number")), key=lambda s: s["number"])
+    return sorted((s for s in prepared_songs().values() if s.get("number") and lines_up(s["id"])), key=lambda s: s["number"])  # karaoke-server: singable only
 
 @app.get("/api/ambient")
 async def ambient():
@@ -404,6 +405,10 @@ async def delete_song(video_id: str):
 async def enqueue(song: Song):
     if len(state.upcoming) >= 100:
         raise HTTPException(409, "Queue is full")
+    # karaoke-server (beta 2026-11-22): a song in our library without lyrics that line up can't be queued, whichever
+    # list it came from (search already lists only playable versions)
+    if song.id in prepared_songs() and not lines_up(song.id):
+        raise HTTPException(409, "This song has no lyrics that line up, so it can't be sung")
     try:
         singer = state.claim_singer(song.singer, song.device) if song.singer else ""
         item = await state.add(song.id, song.artist, song.title, singer, song.device if singer else "")
