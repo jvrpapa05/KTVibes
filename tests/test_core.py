@@ -561,6 +561,21 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
                                ("Ben&Ben - Leaves (Official Music Video)", "Ben&Ben"), ("The Weeknd - Save Your Tears (Official Music Video)", "TheWeekndVEVO")):
             self.assertEqual(kind(title, channel), "official", title)
 
+    def test_5000_song_study_fixes(self):
+        # karaoke-server (2026-11-22): an "Unofficial Music Video" is not the record's own video; a name that starts
+        # with brackets has a name; two disagreeing labels for one timing: the one that ends just after the last line
+        from ktvibes.youtube import kind, song_name
+        from ktvibes.lyrics import real_lengths
+        self.assertEqual(kind("Eraserheads - With A Smile (Unofficial Music Video HQ)", "x"), "other")
+        self.assertEqual(kind("Chris Brown ft. Ludacris - Wet The Bed (Unofficial Music Video)", "ChrisBrownVEVO"), "other")
+        self.assertEqual(song_name("(Not) The One"), "nottheone")
+        self.assertEqual(song_name("(I Just) Died In Your Arms (Official Video)"), "ijustdiedinyourarms")
+        self.assertEqual(song_name("(Official Video) Hello"), "")
+        rec = lambda d: {"duration": d, "syncedLyrics": "[00:21.96]a\n[04:01.55]b"}
+        records = [rec(246), rec(462)]
+        real_lengths(records)
+        self.assertEqual([r["length"] for r in records], [246.0, 246.0])
+
     def test_accents_do_not_stop_a_match(self):
         # karaoke-server: 5,000-song study (2026-11-22): "GIVĒON - Heartbreak Anniversary (Official Music Video)" vs
         # LRCLIB's "Giveon", and "MÍA" vs "MIA": the official video was passed over
