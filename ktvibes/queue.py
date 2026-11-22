@@ -378,9 +378,21 @@ class State:
         if holder and holder["device"] != device:
             raise ValueError(f"“{holder['name']}” is already singing here. Add an initial or a nickname.")
         # One name per phone: switching names frees the old one.
+        old = next((v["name"] for k, v in self.singers.items() if v["device"] == device and k != key), None)
         self.singers = {k: v for k, v in self.singers.items() if v["device"] != device or k == key}
         self.singers[key] = {"name": name, "device": device, "seen": now}
+        if old:
+            self.rename_singer(old, name)
         return name
+
+    def rename_singer(self, old, new):
+        """karaoke-server (beta 2026-11-22): a phone that changes its name takes its songs on stage and in the queue,
+        and its saved settings, along to the new name, so the TV shows it right away."""
+        for item in (self.current, *self.upcoming):
+            if item and str(item.get("singer") or "").casefold() == old.casefold():
+                item["singer"] = new
+        if old.casefold() in self.profiles and new.casefold() not in self.profiles:
+            self.profiles[new.casefold()] = self.profiles.pop(old.casefold())
 
     async def add(self, video_id, artist, title, singer=""):
         if self.queued(video_id):

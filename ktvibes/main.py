@@ -424,7 +424,7 @@ async def claim_singer(singer: Singer):
         name = state.claim_singer(singer.name, singer.device)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-    state.save()
+    await state.broadcast()  # karaoke-server: a renamed singer's songs show the new name on the TV and phones at once
     return {"name": name}
 
 @app.get("/media/{video_id}/{filename}")

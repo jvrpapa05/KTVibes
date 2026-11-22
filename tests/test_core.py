@@ -104,6 +104,20 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         await state.control({'action': 'guide', 'value': 'cycle'})
         self.assertEqual(state.guide, 'latin')
 
+    async def test_renaming_a_singer_updates_their_songs(self):
+        # karaoke-server (beta 2026-11-22): "When I change my name in realtime, does it update what is shown in the TV?"
+        state = State()
+        state.claim_singer('Vince', 'phone-vince-1'); state.claim_singer('Ana', 'phone-ana-1')
+        a = await state.add('abcdefghijk', 'A', 'First', 'Vince'); a['status'] = 'ready'
+        b = await state.add('bbbbbbbbbbb', 'B', 'Second', 'Ana')
+        c = await state.add('ccccccccccc', 'C', 'Third', 'vince')
+        state.promote()
+        state.profiles['vince'] = {'key': 2}
+        state.claim_singer('Vincent', 'phone-vince-1')
+        self.assertEqual([state.current['singer'], b['singer'], c['singer']], ['Vincent', 'Ana', 'Vincent'])
+        self.assertEqual(state.profiles.get('vincent'), {'key': 2})
+        self.assertNotIn('vince', state.singers)
+
     async def test_lyrics_vote_after_each_song(self):
         # karaoke-server (user, 2026-11-22): everyone votes "lyrics in sync?"; the countdown is 10 s and drops to 3 s
         # once every singer with a song in the queue has voted

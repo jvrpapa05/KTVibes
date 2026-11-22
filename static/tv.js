@@ -76,6 +76,8 @@ function render(next){
  // The idle screen already shows a large QR code.
  $('corner-join').hidden=$('qr-mini').hidden=!state.current;
  $('tv-bottom').hidden=!state.current;
+ // karaoke-server: a singer who renames on their phone shows the new name at once (beta 2026-11-22)
+ if(state.current&&state.current.key===currentKey){const who=state.current.singer||'';if($('song-singer').textContent!==who){$('song-singer').textContent=who;$('song-singer').hidden=!who;$('next-singer').textContent=who?`🎤 ${who}`:'';$('next-singer').hidden=!who;}}
  if((state.current?.key||null)!==currentKey){
   endScore();  // skipped: the score stays through the breather
   generation++;music.pause();voice.pause();video.pause();starting=false;buffering=false;videoStarting=false;currentKey=state.current?.key||null;activeLine=-1;relayout();lastSeek=state.seek_id;$('lyrics').replaceChildren();$('lyrics').scrollTo({top:0,behavior:'instant'});error('');
