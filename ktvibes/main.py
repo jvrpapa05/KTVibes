@@ -196,8 +196,11 @@ def check_lyrics(found: list[dict], records: list[dict]) -> None:
             r["parsed"] = r["parsed"]["guessed"]  # judge again from the title, with the larger set of records
     youtube.names_from_records(found, records)
     tag = lambda c: (m.group(0) if (m := youtube.VERSION_TAG.search(c.get("trackName") or "")) else "")
+    # karaoke-server: how much of the recording the lines reach (last line / length): some records stop halfway
+    # ("Broken Vessels": 13 lines, the last at 3:30 of 7:35), so fuller lyrics are offered first
+    reach = lambda c: (lyrics.span(c) or (0, 0))[1] / c["length"]
     youtube.mark_lyrics(found, [(youtube.record_song(c.get("trackName", ""), c.get("artistName", "")), c["length"],
-                                 youtube.artist_keys(c.get("artistName", "")), tag(c)) for c in synced if c.get("length")])
+                                 youtube.artist_keys(c.get("artistName", "")), tag(c), reach(c)) for c in synced if c.get("length")])
 
 class Song(BaseModel):
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")

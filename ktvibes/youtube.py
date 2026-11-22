@@ -130,6 +130,8 @@ def record_song(track: str, artist: str) -> str:
         track = right
     return song_name(track)
 
+PARTIAL_REACH = 0.6  # karaoke-server: lyrics whose last line comes before 60% of the song stop partway
+
 def mark_lyrics(results: list[dict], records: list[tuple], tolerance: float = LYRICS_TOLERANCE) -> None:
     """Flag results with synced lyrics of the same song, artist and length.
     records: (song_name, seconds[, artist keys or a lead artist[, version tag]]) from LRCLIB."""
@@ -146,10 +148,13 @@ def mark_lyrics(results: list[dict], records: list[tuple], tolerance: float = LY
             and version(rec[3] if len(rec) > 3 else "")
         diffs = [abs((r.get("duration") or 0) - rec[1]) for rec in records if rec[0] and same(rec)]
         best = min(diffs, default=None)
+        # karaoke-server: the matching records' lines reach only part of the song (5th field, when given)
+        reach = [rec[4] for rec in records if len(rec) > 4 and rec[0] and same(rec) and abs((r.get("duration") or 0) - rec[1]) <= tolerance]
         # a cover or live version can be as long as the record and still be sung differently: never "matching"
         r["lyrics_match"] = best is not None and best <= tolerance and bool(r.get("duration")) and r.get("kind") not in ("cover", "live")
         if r["lyrics_match"]:
             r["lyrics_diff"] = round(best, 1)
+            r["lyrics_partial"] = bool(reach) and max(reach) < PARTIAL_REACH
 
 # karaoke-server: names read off a YouTube title were right only ~76% of the time on 1,000 top songs (reversed
 # "Song - Artist", the channel taken as the artist, "Audio"/"HQ"/"Remastered 2023" left in). LRCLIB's records for the
@@ -264,10 +269,11 @@ def order_results(results: list[dict], query: str = "") -> list[dict]:
         name = song_name((r.get("parsed") or {}).get("title", ""))
         asked = 0 if wanted and len(name) >= 2 and name in wanted else 1
         if r.get("lyrics_match"):
-            return (asked, 0, KIND_ORDER[kind], r.get("lyrics_diff", 0), 0)
+            # lyrics for the whole song before lyrics that stop partway, whatever the kind of video
+            return (asked, 0, bool(r.get("lyrics_partial")), KIND_ORDER[kind], r.get("lyrics_diff", 0), 0)
         if kind != "official":
-            return (asked, 1, KIND_ORDER[kind], 0, 0)
-        return (asked, 1, 0, first[song(r)], r.get("duration") or float("inf"))
+            return (asked, 1, False, KIND_ORDER[kind], 0, 0)
+        return (asked, 1, False, 0, first[song(r)], r.get("duration") or float("inf"))
     return sorted(results, key=key)
 
 def _extract(options: dict, video_id: str, progress=None, attempts: int = 4) -> dict:

@@ -460,6 +460,31 @@ def entry_error(samples, rate: int, lines: list[dict], hop: float = 0.1) -> floa
     hits = np.nonzero(runs >= int(need * 0.8))[0]
     return round(float(starts[0] - hits[0] * hop), 1) if len(hits) else None
 
+def uncovered(samples, rate: int, lines: list[dict], duration: float | None = None, hop: float = 0.5) -> list[list[float]]:
+    """karaoke-server (beta 2026-11-22, Hillsong "Broken Vessels": every LRCLIB record has 13 lines for a 7.5-minute
+    song): stretches where someone is clearly singing but the lyrics have no line, as [start, end] seconds, so the TV
+    can say "No lyrics for this part" instead of a blank screen that looks broken. A gap counts when at least 18 s of
+    it is voiced through most of it (an instrumental break is quiet; shorter ones are ad-libs and held notes)."""
+    import numpy as np
+    starts = [line["t"] for line in lines if line.get("text", "").strip()]
+    if not starts or not len(samples):
+        return []
+    mono = samples.mean(axis=1) if getattr(samples, "ndim", 1) > 1 else samples
+    n = max(int(rate * hop), 1)
+    frames = mono[: len(mono) // n * n].reshape(-1, n)
+    db = 20 * np.log10(np.sqrt(np.mean(frames ** 2, axis=1)) + 1e-9)
+    voice = db > np.percentile(db, 95) - 18
+    end = duration or len(voice) * hop
+    out = []
+    for a, b in zip(starts, starts[1:] + [end]):
+        lo, hi = a + 8, b - 1  # the line on screen covers its own first seconds
+        if hi - lo < 18:
+            continue
+        part = voice[int(lo / hop):int(hi / hop)]
+        if len(part) and part.mean() > 0.6:
+            out.append([round(lo, 1), round(hi, 1)])
+    return out
+
 def real_lengths(records: list[dict]) -> None:
     """Set record["length"]: the real length of the recording its timing fits, or None if it can't fit any."""
     import statistics

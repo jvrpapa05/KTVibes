@@ -379,6 +379,8 @@ function frame(now){
   document.body.classList.toggle('between',!!waiting);
   video.hidden=!showVideo()||!!waiting||!!video.error;
   const sceneryShown=showScenery(!!waiting);
+  // karaoke-server: singing with no lyric line for it (the lyrics file is incomplete): say so, so it isn't a blank
+  {const t=music.currentTime,gap=!waiting&&(state.current?.uncovered||[]).some(([a,b])=>t>=a&&t<b);if($('lyrics-gap').hidden===gap)$('lyrics-gap').hidden=!gap;}
   $('video-shade').hidden=video.hidden&&!sceneryShown;
   if(state.current&&!waiting&&enabled&&state.playing)start();
   if(showVideo()&&!waiting&&!buffering&&!music.paused&&state.playing&&video.readyState>=3){

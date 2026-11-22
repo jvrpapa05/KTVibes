@@ -99,7 +99,8 @@ def timed_lyrics(folder: Path, raw: str, samples_path: Path, lines: list[dict], 
     # karaoke-server: how far the first line is from the singer's first phrase; search only offers library songs
     # whose lyrics line up (see main.lines_up)
     entry = lyrics.entry_error(samples, rate, lines)
-    temporary.write_text(json.dumps({"key": key, "aligned": aligned, "entry_error": entry, "lines": lines}, ensure_ascii=False), encoding="utf-8")
+    gaps = lyrics.uncovered(samples, rate, lines, len(samples) / rate)  # karaoke-server: sung parts with no lyrics
+    temporary.write_text(json.dumps({"key": key, "aligned": aligned, "entry_error": entry, "uncovered": gaps, "lines": lines}, ensure_ascii=False), encoding="utf-8")
     temporary.replace(folder / "timed.json")
     return lines
 
@@ -184,6 +185,26 @@ async def better_timing(folder: Path, raw: str, identity: list, duration: float,
     meta["timings_tried"] = hashlib.sha256(best[1].encode()).hexdigest()[:16] + ":"
     meta.pop("lyric_offset", None)
     return best[1], best[2]
+
+def sung_without_lyrics(folder: Path, lines: list[dict]) -> list:
+    """karaoke-server: timed.json's "uncovered" stretches (lyrics.uncovered), worked out once for songs timed before
+    it existed."""
+    path = folder / "timed.json"
+    try:
+        timed = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if "uncovered" not in timed:
+        try:
+            samples, rate = sf.read(stems.path(folder, "vocals"), dtype="float32")
+            timed["uncovered"] = lyrics.uncovered(samples, rate, lines, len(samples) / rate)
+            temporary = folder / "timed.tmp"
+            temporary.write_text(json.dumps(timed, ensure_ascii=False), encoding="utf-8")
+            temporary.replace(path)
+        except Exception:
+            log.exception("Couldn't check %s for sung parts without lyrics", folder.name)
+            return []
+    return timed["uncovered"]
 
 class Removed(Exception):
     """The song left the queue while it was being prepared."""
@@ -349,6 +370,7 @@ async def run(state, cache: Path):
                     item["lyrics"] = await asyncio.to_thread(timed_lyrics, folder, raw, stems.path(folder, "vocals"), item["lyrics"], meta.get("lyrics_duration"))
                     if (better := await better_timing(folder, raw, identity, item["duration"], meta)):
                         raw, item["lyrics"] = better
+                    item["uncovered"] = await asyncio.to_thread(sung_without_lyrics, folder, item["lyrics"])
                     lyrics.line_starts(item["lyrics"])  # cheap, so kept out of the timing cache
                 except Exception:
                     log.exception("Word timing unavailable for %s", item["id"])

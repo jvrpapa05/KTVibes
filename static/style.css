@@ -245,3 +245,5 @@ body.still :is(.tv-tools,.tv-bottom,.open-remote){opacity:0;pointer-events:none}
 /* karaoke-server: "Paused by Ana" stays on the TV while a song is paused */
 .pause-badge{position:fixed;left:50%;top:50%;z-index:20;transform:translate(-50%,-50%);display:flex;align-items:center;gap:.5em;padding:.5em 1.1em;border-radius:999px;background:#000000b8;border:1px solid #ffffff26;color:#fff;font:700 clamp(22px,2.4vw,44px)/1.1 'Space Grotesk',sans-serif;box-shadow:0 12px 40px #000a;backdrop-filter:blur(6px)}
 .pause-icon{font-size:1.1em;color:var(--lime)}
+/* karaoke-server: someone is singing but the lyrics have no line for it (lyrics.uncovered) */
+.lyrics-gap{position:fixed;left:50%;bottom:16vh;z-index:3;transform:translateX(-50%);margin:0;padding:.35em 1em;border-radius:999px;background:#0000008c;color:#ffffffc4;font:600 clamp(16px,1.6vw,28px)/1.2 'Space Grotesk',sans-serif;white-space:nowrap}

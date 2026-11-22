@@ -722,6 +722,19 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         self.assertEqual(again.take(50).get("lite"), "aaaaaaaaaaa.720.mp4")
         self.assertTrue(scenery.SERVE.fullmatch("aaaaaaaaaaa.720.mp4") and not scenery.NAME.fullmatch("aaaaaaaaaaa.720.mp4"))
 
+    def test_sung_parts_without_lyrics_are_found(self):
+        # karaoke-server (beta 2026-11-22, "Broken Vessels": 13 lines for a 7.5-minute song)
+        import numpy as np
+        from ktvibes.lyrics import uncovered
+        rate = 1000
+        t = np.arange(300 * rate) / rate
+        voice = np.where((t < 100) | (t > 160), 0.5, 0.0) * np.sin(2 * np.pi * 220 * t)  # quiet 100-160 s: a break
+        lines = [{"t": float(x), "text": "la"} for x in (10, 20, 30, 40, 50, 60, 70, 80, 90, 165, 175, 185)]
+        gaps = uncovered(voice.astype("float32"), rate, lines, 300)
+        self.assertEqual(len(gaps), 1)                 # the instrumental break (90-165) isn't flagged...
+        self.assertGreater(gaps[0][0], 185)            # ...but singing after the last line (193-299 s) is
+        self.assertGreater(gaps[0][1], 290)
+
     def test_accents_do_not_stop_a_match(self):
         # karaoke-server: 5,000-song study (2026-11-22): "GIVĒON - Heartbreak Anniversary (Official Music Video)" vs
         # LRCLIB's "Giveon", and "MÍA" vs "MIA": the official video was passed over
