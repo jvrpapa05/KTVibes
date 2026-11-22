@@ -103,6 +103,63 @@ def timed_lyrics(folder: Path, raw: str, samples_path: Path, lines: list[dict], 
     temporary.replace(folder / "timed.json")
     return lines
 
+# karaoke-server (beta report 2026-11-22, Ashe "Stop The Wedding!"): LRCLIB had the album timing (first line 0:07.5)
+# and one labelled with the video's length but timed 7 s later; the length matched, so the late one was used. When
+# the first line lands more than ENTRY_LIMIT from the singer's first phrase, the song's other timings are tried and
+# the one that starts with the singer is kept.
+ENTRY_LIMIT = 3.0
+
+async def better_timing(folder: Path, raw: str, identity: list, duration: float, meta: dict):
+    """(raw, lines) of another LRCLIB timing that starts with the singer, or None."""
+    try:
+        entry = json.loads((folder / "timed.json").read_text(encoding="utf-8")).get("entry_error")
+    except (OSError, ValueError):
+        return None
+    tried_key = hashlib.sha256(raw.encode()).hexdigest()[:16]
+    # a version someone picked on the remote stays; each timing is looked at once
+    if entry is None or abs(entry) <= ENTRY_LIMIT or not raw or meta.get("lyrics_chosen") or meta.get("timings_tried") == tried_key:
+        return None
+    meta["timings_tried"] = tried_key
+    first = lambda text: (lyrics.span({"syncedLyrics": text}) or (None,))[0]
+    now = first(raw)
+    try:
+        found = await lyrics.candidates(*identity, duration, (meta.get("source_title") or "",), exhaustive=True)
+    except Exception:
+        log.exception("Other lyric timings unavailable for %s", folder.name)
+        return None
+    lyrics.real_lengths([c for c in found if c.get("syncedLyrics")])
+    seen, options = {raw}, []
+    for c in found:
+        text = c.get("syncedLyrics") or ""
+        start = first(text)
+        if text in seen or start is None or now is None or abs(start - now) < 1.5 or not lyrics.fits(c, duration):
+            continue
+        seen.add(text)
+        options.append((abs(start - (now - entry)), c))  # closest to where the singer really starts, first
+    best = (abs(entry), None, None, None)
+    trial = folder / "timing-trial"
+    for _, c in sorted(options, key=lambda o: o[0])[:2]:
+        trial.mkdir(exist_ok=True)
+        (trial / "timed.json").unlink(missing_ok=True)
+        text = c["syncedLyrics"]
+        lines = await asyncio.to_thread(timed_lyrics, trial, text, stems.path(folder, "vocals"), lyrics.parse_lrc(text), c.get("length"))
+        tried = json.loads((trial / "timed.json").read_text(encoding="utf-8")).get("entry_error")
+        log.info("Lyrics for %s: first line %+.1fs from the singer; LRCLIB %s gives %s", folder.name, entry, c.get("id"), tried)
+        if tried is not None and abs(tried) < best[0] - 1:
+            best = (abs(tried), text, lines, c)
+            (trial / "timed.json").replace(folder / "timed.json")
+    if trial.exists():
+        for f in trial.iterdir():
+            f.unlink()
+        trial.rmdir()
+    if best[1] is None:
+        return None
+    (folder / "lyrics.lrc").write_text(best[1], encoding="utf-8")
+    meta["lyrics_duration"] = best[3].get("length") or best[3].get("duration")
+    meta["timings_tried"] = hashlib.sha256(best[1].encode()).hexdigest()[:16]
+    meta.pop("lyric_offset", None)
+    return best[1], best[2]
+
 class Removed(Exception):
     """The song left the queue while it was being prepared."""
 
@@ -254,6 +311,7 @@ async def run(state, cache: Path):
                     # A miss is remembered for a week, so a later LRCLIB addition is still picked up.
                     meta["lyrics_identity"], meta["lyrics_checked"] = identity, time.time()
                     meta.pop("lyric_offset", None)  # a nudge for other lyrics no longer fits
+                    meta.pop("lyrics_chosen", None)
                     if result["raw"]:
                         (folder / "lyrics.lrc").write_text(result["raw"], encoding="utf-8")
                     else:
@@ -264,6 +322,8 @@ async def run(state, cache: Path):
             if item["lyrics"]:
                 try:
                     item["lyrics"] = await asyncio.to_thread(timed_lyrics, folder, raw, stems.path(folder, "vocals"), item["lyrics"], meta.get("lyrics_duration"))
+                    if (better := await better_timing(folder, raw, identity, item["duration"], meta)):
+                        raw, item["lyrics"] = better
                     lyrics.line_starts(item["lyrics"])  # cheap, so kept out of the timing cache
                 except Exception:
                     log.exception("Word timing unavailable for %s", item["id"])

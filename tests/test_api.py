@@ -272,9 +272,10 @@ class APITests(unittest.TestCase):
         song('bbbbbbbbbbb', 217, 200, entry=0.2)      # longer (an outro), but starts with the singer
         song('ccccccccccc', 200, 209, entry=-7.5)     # "This Is Me": 7.5 s early
         song('ddddddddddd', 200, None, entry=None)    # unknown: benefit of the doubt
+        song('fffffffffff', 208, 209, entry=5.8)      # Ashe "Stop The Wedding!": same length, but 5.8 s late
         song('eeeeeeeeeee', 200, 200, lines=False)    # no lyrics at all
-        self.assertEqual([self.main.lines_up(v) for v in ('aaaaaaaaaaa', 'bbbbbbbbbbb', 'ccccccccccc', 'ddddddddddd', 'eeeeeeeeeee')],
-                         [True, True, False, True, False])
+        self.assertEqual([self.main.lines_up(v) for v in ('aaaaaaaaaaa', 'bbbbbbbbbbb', 'ccccccccccc', 'ddddddddddd', 'eeeeeeeeeee', 'fffffffffff')],
+                         [True, True, False, True, False, False])
 
     def test_search_pages(self):
         with patch.object(self.main.youtube, 'search', return_value=[]) as search, \

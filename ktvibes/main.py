@@ -216,9 +216,8 @@ def prepared_songs() -> dict:
     return songs
 
 def lines_up(video_id: str) -> bool:
-    """karaoke-server: a prepared song can be sung if it has timed lyrics that line up with it: the lyrics' recording
-    is as long as the video, or (when it isn't, or isn't known) the first line was measured within 3 s of the
-    singer's first phrase. Unknown on both counts: given the benefit of the doubt."""
+    """karaoke-server: a prepared song can be sung if it has timed lyrics whose first line was measured within 3 s
+    of the singer's first phrase. Not measured (older songs): given the benefit of the doubt."""
     folder = CACHE / video_id
     try:
         timed = json.loads((folder / "timed.json").read_text(encoding="utf-8"))
@@ -227,11 +226,12 @@ def lines_up(video_id: str) -> bool:
         return False
     if not any(line.get("text", "").strip() for line in timed.get("lines", [])):
         return False
-    length = meta.get("lyrics_duration")
-    if length and abs(float(meta.get("duration") or 0) - float(length)) <= youtube.LYRICS_TOLERANCE:
-        return True
+    # karaoke-server: the measured start decides when known: a matching length is not enough, LRCLIB labels some
+    # late timings with the video's length (Ashe "Stop The Wedding!", 5.8 s late; beta report 2026-11-22)
     entry = timed.get("entry_error")
-    return entry is None or abs(entry) <= 3  # the detector is good to about ±1 s
+    if entry is not None:
+        return abs(entry) <= worker.ENTRY_LIMIT  # the detector is good to about ±1 s
+    return True  # not measured (older songs): given the benefit of the doubt, as before
 
 def library_matches(q: str, limit: int = 3) -> list[dict]:
     """karaoke-server: prepared songs with timed lyrics that match every word of the search (a word may be the start
@@ -367,6 +367,7 @@ async def choose_lyrics(video_id: str, choice: LyricChoice):
     meta.pop("lyric_offset", None)  # a nudge for other lyrics no longer fits
     lyrics.real_lengths([chosen])  # karaoke-server: see worker.MATCHED_LENGTH (alone, only an impossible length is caught)
     meta["lyrics_duration"] = chosen.get("length")
+    meta["lyrics_chosen"] = choice.id  # karaoke-server: kept as picked (worker.better_timing leaves it alone)
     worker.save_meta(folder, meta)
     if state.current and state.current["id"] == video_id:
         job = {"version": choice.id, "started": time.time(), "duration": meta["lyrics_duration"]}
