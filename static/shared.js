@@ -67,7 +67,7 @@ export function marquee(node){
  let strip=node.firstElementChild;
  if(!(strip&&strip.classList.contains('mq')&&node.childNodes.length===1)){strip=document.createElement('span');strip.className='mq';strip.append(...node.childNodes);node.append(strip);}
  const over=strip.scrollWidth-node.clientWidth;
- if(over>2&&!REDUCED.matches){node.style.setProperty('--mq-shift',`${-over}px`);node.style.setProperty('--mq-time',`${(6+over/8).toFixed(1)}s`);node.classList.add('mq-on');}
+ if(over>2&&!REDUCED.matches){node.style.setProperty('--mq-shift',`${-over}px`);node.style.setProperty('--mq-time',`${(3+over/40).toFixed(1)}s`);node.classList.add('mq-on');}
  else node.classList.remove('mq-on');
 }
 export function marquees(selectors){for(const node of document.querySelectorAll(selectors))if(node.getClientRects().length)marquee(node);}  // laid out (offsetParent is null under fixed headers)

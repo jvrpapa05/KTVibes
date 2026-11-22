@@ -293,7 +293,7 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
 .mq{display:inline-block;white-space:nowrap}
 .mq-on{text-overflow:clip!important;-webkit-mask-image:linear-gradient(90deg,#000 0,#000 92%,transparent);mask-image:linear-gradient(90deg,#000 0,#000 92%,transparent)}
 .mq-on>.mq{animation:mq var(--mq-time,8s) ease-in-out infinite alternate}
-@keyframes mq{0%,35%{transform:translateX(0)}65%,100%{transform:translateX(var(--mq-shift,0))}}
+@keyframes mq{0%,15%{transform:translateX(0)}85%,100%{transform:translateX(var(--mq-shift,0))}}
 /* karaoke-server: your own emoji */
 .reactions{flex-wrap:wrap}
 .react.add-emoji{font-size:22px;color:var(--muted);border-style:dashed}

@@ -156,13 +156,13 @@ body.still :is(.tv-tools,.tv-bottom,.open-remote){opacity:0;pointer-events:none}
 .next-singer{margin:0 0 10px;font:700 clamp(22px,2.4vw,40px)/1.1 'Space Grotesk',sans-serif;color:var(--lime)}
 .tv #now-card #song-singer{flex:0 0 auto;margin:0;font:700 1em/1.2 'Space Grotesk',sans-serif;color:var(--lime);text-shadow:0 2px 6px #000}
 .tv #now-card #song-singer::before{content:'· '}
-#on-deck .deck-singer{flex:none;font-style:normal;font-weight:700;color:var(--lime)}
+#on-deck .deck-singer{flex:none;max-width:30%;overflow:hidden;text-overflow:ellipsis;font-style:normal;font-weight:700;color:var(--lime)}
 /* karaoke-server: version, there when you look for it. */
 .app-version{position:fixed;right:10px;bottom:6px;z-index:1;font-size:11px;color:#fff;opacity:.22;letter-spacing:.04em;pointer-events:none;text-shadow:0 1px 2px #000}
 /* karaoke-server: shout-outs and photo polaroids from the phones */
 .fun-stack{position:fixed;left:50%;top:24vh;z-index:4;display:flex;flex-direction:column;align-items:center;gap:2vh;transform:translateX(-50%);pointer-events:none;width:min(80vw,1400px)}
-.shout{position:relative;display:flex;flex-direction:column;align-items:center;gap:.15em;max-width:100%;padding:.45em 1.1em .55em;border-radius:.6em;background:var(--shout-bg,linear-gradient(120deg,#d7fc70,#f6e05e 45%,#ff7ab6));color:#151a12;text-align:center;font:800 calc(clamp(34px,4.4vw,92px)*var(--ui,1))/1.08 'Space Grotesk',sans-serif;letter-spacing:-.02em;overflow-wrap:anywhere;box-shadow:0 .25em 0 #0006,0 30px 80px #000b;transform:rotate(var(--tilt,-2deg));animation:shout-in .7s cubic-bezier(.2,1.4,.4,1) both}
-.shout::before,.shout::after{content:'✨';position:absolute;top:-.55em;font-size:.7em}
+.shout{position:relative;display:flex;flex-direction:column;align-items:center;gap:.15em;max-width:100%;padding:.45em 1.1em .55em;border-radius:.6em;background:var(--shout-bg,linear-gradient(120deg,#d7fc70,#f6e05e 45%,#ff7ab6));color:#151a12;text-align:center;font:800 calc(clamp(34px,4.4vw,92px)*var(--ui,1))/1.08 'Space Grotesk',sans-serif;letter-spacing:-.02em;overflow-wrap:anywhere;box-shadow:0 .25em 0 #0006,0 30px 80px #000b;transform:rotate(var(--tilt,-2deg));animation:shout-in .7s cubic-bezier(.2,1.4,.4,1) both,shout-wiggle 2.6s ease-in-out .7s infinite}
+.shout::before,.shout::after{content:'✨';position:absolute;top:-.55em;font-size:.7em;animation:sparkle 1.2s ease-in-out infinite alternate}
 .shout::before{left:-.5em}.shout::after{right:-.5em;content:'🎉';animation-delay:.4s}
 .shout b{font-size:.32em;font-weight:800;letter-spacing:.14em;text-transform:uppercase;padding:.2em .7em;border-radius:999px;background:#151a12;color:#d7fc70}
 .shout.out,.polaroid.out{animation:fun-out .5s ease-in both}
@@ -181,7 +181,10 @@ body.still :is(.tv-tools,.tv-bottom,.open-remote){opacity:0;pointer-events:none}
 .mq{display:inline-block;white-space:nowrap}
 .mq-on{text-overflow:clip!important;-webkit-mask-image:linear-gradient(90deg,#000 0,#000 92%,transparent);mask-image:linear-gradient(90deg,#000 0,#000 92%,transparent)}
 .mq-on>.mq{animation:mq var(--mq-time,8s) ease-in-out infinite alternate}
-@keyframes mq{0%,35%{transform:translateX(0)}65%,100%{transform:translateX(var(--mq-shift,0))}}
+@keyframes mq{0%,15%{transform:translateX(0)}85%,100%{transform:translateX(var(--mq-shift,0))}}
+/* karaoke-server: the Up next list scrolls calmer: slower, holding still longer at each end (user, 2026-11-22: "it makes me feel dizzy") */
+#on-deck .mq-on>.mq{animation-name:mq-calm;animation-duration:calc(var(--mq-time,8s) * 2.5)}
+@keyframes mq-calm{0%,35%{transform:translateX(0)}65%,100%{transform:translateX(var(--mq-shift,0))}}
 /* karaoke-server: song notices on the TV show the artwork; the icon sits on its corner as a badge */
 .osd-art{flex:none;width:64px;height:64px;border-radius:18px;object-fit:cover;box-shadow:0 6px 18px #0008}
 .osd.has-art .osd-icon{position:absolute;left:58px;top:50%;width:28px;height:28px;margin-top:6px;border-radius:50%;font-size:15px;box-shadow:0 0 0 3px #202a1c}
