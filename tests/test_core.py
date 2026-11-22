@@ -140,10 +140,20 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(worker.vote_verdict(Path(folder.name) / 'abcdefghijk', {'lyrics_votes': saved}), 'flagged')
         with self.assertRaises(ValueError):
             await state.control({'action': 'lyrics_vote', 'key': 'old', 'value': 'up', 'device': 'phone-ana-1'})
+        # a phone that hasn't answered can still vote on it after the next song ends
+        state.position = 120
+        await state.control({'action': 'skip'})
+        await state.control({'action': 'lyrics_vote', 'key': first['key'], 'value': 'up', 'device': 'late-phone-1'})
+        saved = json.loads((Path(folder.name) / 'abcdefghijk' / 'meta.json').read_text())['lyrics_votes']
+        self.assertEqual(saved[-1]['up'], 2)
         # a song skipped early isn't asked about
+        third = await state.add('ccccccccccc', 'C', 'Third', 'Ana')
+        third['status'], third['duration'], third['lyrics'] = 'ready', 200, [{'t': 1, 'text': 'a'}]
+        state.transition_until = 0; state.promote()
+        self.assertEqual(state.current['title'], 'Third')
         state.position = 5
         await state.control({'action': 'skip'})
-        self.assertIsNone(state.snapshot()['vote'])
+        self.assertEqual(state.snapshot()['vote']['title'], 'Second')  # not asked; the last question stays for phones
 
     async def test_breather_only_between_songs(self):
         import time

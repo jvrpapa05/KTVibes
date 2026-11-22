@@ -61,7 +61,8 @@ BREATHER = 4  # seconds between one song ending and the next starting
 # VOTE_AFTER seconds into the next song. Songs stopped before VOTE_MIN_PLAYED aren't asked about.
 VOTE_WAIT = 10
 VOTE_FAST = 3
-VOTE_AFTER = 20
+VOTE_AFTER = 20  # (the TV's tally) seconds into the next song
+VOTE_KEEP = 2 * 3600  # phones may still answer until then (user: the phone's question stays until answered or closed)
 VOTE_MIN_PLAYED = float(os.environ.get("KTVIBES_VOTE_MIN_PLAYED", 30))  # tests set it lower
 VOTE_WHY = ("early", "late", "words")
 SCORE_HOLD = 5  # Classic: the score shows this long when a song is sung to the end, before the 예약곡 board
@@ -112,6 +113,7 @@ class State:
         self.lyrics_sent = {}  # TV socket -> key of the song whose lyrics it already has
         self.lyrics_applying = {}  # karaoke-server: song id -> {"version", "started"} while new lyrics are timed in the background
         self.vote = None  # karaoke-server: the open "lyrics in sync?" vote (see VOTE_WAIT)
+        self.past_votes = {}  # karaoke-server: earlier songs' votes, still open to phones that haven't answered
 
     def guides(self):
         """Guide modes with something to show for the current song (all of them when idle)."""
@@ -143,7 +145,7 @@ class State:
 
     def vote_summary(self):
         vote = self.vote
-        if not vote or time.time() > vote["closes"]:
+        if not vote or time.time() > vote["keep"]:
             return None
         votes = vote["votes"].values()
         needed = self.vote_voters()
@@ -153,21 +155,23 @@ class State:
 
     def open_vote(self, item, position):
         if position < VOTE_MIN_PLAYED or not item.get("lyrics"):
-            self.vote = None
-            return
+            return  # not asked about; phones keep the earlier song's question until they answer it
         now = time.time()
         waiting = bool(self.current or any(i["status"] != "error" for i in self.upcoming))
         if waiting:
             self.transition_until = max(self.transition_until, now + VOTE_WAIT)
         closes = (self.transition_until if waiting else now + VOTE_WAIT) + VOTE_AFTER
+        if self.vote:  # an unanswered phone can still vote on the song before
+            self.past_votes[self.vote["key"]] = self.vote
+            self.past_votes = dict(list(self.past_votes.items())[-10:])
         self.vote = {"key": item["key"], "id": item["id"], "title": item["title"], "artist": item["artist"], "singer": item.get("singer") or "",
-                     "song": [item], "votes": {}, "why": {}, "opened": now, "closes": closes}
+                     "song": [item], "votes": {}, "why": {}, "opened": now, "closes": closes, "keep": now + VOTE_KEEP}
 
     def cast_vote(self, message):
         """One vote per phone; a phone may change its vote. Returns the stored record for the song's meta."""
-        vote = self.vote
         device = str(message.get("device") or "")
-        if not vote or message.get("key") != vote["key"] or time.time() > vote["closes"]:
+        vote = self.vote if self.vote and message.get("key") == self.vote["key"] else self.past_votes.get(message.get("key"))
+        if not vote or time.time() > vote["keep"]:
             raise ValueError("Voting for that song has closed")
         if len(device) < 8:
             raise ValueError("This remote needs a reload")
@@ -183,7 +187,7 @@ class State:
         elif why:
             vote["why"][device] = why
         # everyone the room was waiting for has voted: start the next song soon
-        needed = self.vote_voters()
+        needed = self.vote_voters() if vote is self.vote else set()
         if needed and needed <= set(vote["votes"]) and self.transition_until - time.time() > VOTE_FAST:
             self.transition_until = time.time() + VOTE_FAST
         metrics.record("lyrics_vote", song=vote["id"], title=vote["title"], vote=value, why=why,
@@ -484,7 +488,8 @@ class State:
             return
         if action == "lyrics_vote":
             record = self.cast_vote(message)
-            self.save_vote(self.vote["id"], record)
+            vote = self.vote if self.vote and self.vote["key"] == message.get("key") else self.past_votes[message["key"]]
+            self.save_vote(vote["id"], record)
             await self.broadcast(persist=False)
             return
         if action == "hide":

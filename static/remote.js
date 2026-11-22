@@ -39,36 +39,39 @@ function render(next){
  const ready=[state.current,...state.upcoming].filter(i=>i?.status==='ready').map(i=>i.key).join();
  if(ready!==readyKeys){readyKeys=ready;loadRecent();classicUi?.loadBook();}
 }
-// karaoke-server: "Were the lyrics in sync?" after each song (user, 2026-11-22). Everyone votes; the countdown on the
-// TV shortens once every singer with a song in the queue has. This phone remembers its own vote for that song.
+// karaoke-server: "Were the lyrics in sync?" after each song (user, 2026-11-22). Everyone votes. On the phone it has
+// no time limit: it stays on top, with the remote dimmed behind it, until it's answered (👍, or 👎 and what was wrong)
+// or closed with ✕, so people decide before queueing the next song. The TV's countdown shortens once every singer
+// with a song in the queue has voted. This phone remembers its answer for each song.
 const VOTE_KEY='karaoke.vote';
-const myVote=()=>{try{return JSON.parse(localStorage.getItem(VOTE_KEY)||'null')||{};}catch{return {};}};
-let voteDismissed='',voteHideTimer;
+const myVote=()=>{try{return JSON.parse(localStorage.getItem(VOTE_KEY)||'null')||{};}catch{return voteMemo;}};
+let voteMemo={},voteDoneTimer;
+function saveVote(mine){voteMemo=mine;try{localStorage.setItem(VOTE_KEY,JSON.stringify(mine));}catch{}}
 function showVote(){
  const v=state.vote,box=$('vote');
- const open=v&&(v.closes-(Date.now()/1000+skew))>0&&voteDismissed!==v.key;
- if(!open){box.hidden=true;return;}
- const mine=myVote(),voted=mine.key===v.key?mine:null;
- box.hidden=false;
+ const mine=myVote(),voted=v&&mine.key===v.key?mine:null;
+ const open=!!v&&!voted?.done;
+ box.hidden=!open;$('vote-scrim').hidden=!open;
+ if(!open)return;
  $('vote-song').textContent=`${v.title} · ${v.artist}`;
  $('vote-up').classList.toggle('on',voted?.value==='up');$('vote-down').classList.toggle('on',voted?.value==='down');
  $('vote-why').hidden=voted?.value!=='down';
  document.querySelectorAll('#vote-why [data-why]').forEach(b=>b.classList.toggle('on',voted?.why===b.dataset.why));
- $('vote-thanks').hidden=!voted;
- $('vote-thanks').textContent=voted?`Thanks! ${v.needed?`${v.voted_needed} of ${v.needed} singers voted`:''}`.trim():'';
+ $('vote-thanks').hidden=!voted?.value;
+ $('vote-thanks').textContent=voted?.value==='up'||voted?.why?'Thanks!':voted?.value==='down'?'Thanks! What was wrong?':'';
 }
 function castVote(value,why){
  const v=state?.vote;if(!v)return;
- const mine={key:v.key,value,why:value==='down'?why||null:null};
- try{localStorage.setItem(VOTE_KEY,JSON.stringify(mine));}catch{}
- sendRaw({action:'lyrics_vote',key:v.key,value,why:mine.why||undefined,device:deviceId()});haptic(8);showVote();
- clearTimeout(voteHideTimer);
- if(value==='up'||why)voteHideTimer=setTimeout(()=>{voteDismissed=v.key;showVote();},2500);
+ const done=value==='up'||!!why;
+ saveVote({key:v.key,value,why:value==='down'?why||null:null,done:false});
+ sendRaw({action:'lyrics_vote',key:v.key,value,why:value==='down'&&why?why:undefined,device:deviceId()});haptic(8);showVote();
+ clearTimeout(voteDoneTimer);
+ // a moment to see "Thanks!", then the remote is free again
+ if(done)voteDoneTimer=setTimeout(()=>{saveVote({...myVote(),done:true});showVote();},900);
 }
 document.querySelectorAll('#vote [data-vote]').forEach(b=>b.addEventListener('click',()=>castVote(b.dataset.vote)));
 document.querySelectorAll('#vote [data-why]').forEach(b=>b.addEventListener('click',()=>castVote('down',b.dataset.why)));
-$('vote-close').addEventListener('click',()=>{voteDismissed=state?.vote?.key||'';showVote();});
-setInterval(()=>{if(state&&!$('vote').hidden)showVote();},1000);
+$('vote-close').addEventListener('click',()=>{const v=state?.vote;if(v)saveVote({...(myVote().key===v.key?myVote():{key:v.key}),done:true});showVote();});
 // Now playing: a card at the top, handing over to the dock once scrolled away.
 function showNow(first){
  const c=state.current,art=c?thumbnail(c.id):'';placeFun(!!c);
@@ -561,19 +564,21 @@ classicUi=classicRemote({send,toast,haptic,swipeable});if(state)classicUi.render
 // karaoke-server: ask for the singer's name once per phone; every song queued from here carries it.
 const SINGER='karaoke.singer';let singerName='';  // kept in memory too, for private tabs where storage fails
 function singer(){try{return localStorage.getItem(SINGER)||singerName;}catch{return singerName;}}
-function showSinger(){$('singer-name').textContent=singer()||'—';}
+function showSinger(){$('singer-name').textContent=singer()||'there';}
 // Names are unique: the server lends a name to one phone (a random id kept here) until it's idle for 6 hours.
 const DEVICE='karaoke.device';let deviceMemo='';
 function deviceId(){try{let id=localStorage.getItem(DEVICE);if(!id){id=crypto.randomUUID?.()||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;localStorage.setItem(DEVICE,id);}return id;}catch{return deviceMemo||=`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;}}
 function setSinger(name){singerName=name;try{if(name)localStorage.setItem(SINGER,name);else localStorage.removeItem(SINGER);}catch{}showSinger();if(state)showControls();}  // whose settings the sheet shows depends on the name
 async function claim(name){return api('/api/singer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,device:deviceId()})});}
-function askName(message=''){$('name-input').value=singer();$('name-error').textContent=message;$('name-error').hidden=!message;$('name-gate').hidden=false;setTimeout(()=>$('name-input').focus(),50);}
+function askName(message=''){$('name-input').value=singer();$('name-cancel').hidden=!singer();$('name-save').textContent=singer()?'Save':'Start';$('name-error').textContent=message;$('name-error').hidden=!message;$('name-gate').hidden=false;setTimeout(()=>$('name-input').focus(),50);}
 $('name-form').onsubmit=async e=>{e.preventDefault();const name=$('name-input').value.split(/\s+/).filter(Boolean).join(' ').slice(0,40);if(!name)return;
  $('name-save').disabled=true;
  try{const r=await claim(name);setSinger(r.name);$('name-gate').hidden=true;toast(`Singing as ${r.name}`);}
  catch(error){$('name-error').textContent=error.message;$('name-error').hidden=false;}
  finally{$('name-save').disabled=false;}};
-$('singer-change').onclick=()=>askName();
+// karaoke-server: the header's "Hello, <name>!" is where the name is changed (user, 2026-11-22)
+$('hello').onclick=()=>askName();
+$('name-cancel').onclick=()=>{$('name-gate').hidden=true;};
 // Keep the name while the remote is open; if someone else took it meanwhile, ask again.
 async function keepName(){const name=singer();if(!name)return askName();try{const r=await claim(name);setSinger(r.name);}catch(error){if(/already/.test(error.message)){setSinger('');askName(error.message);}}}
 setInterval(()=>{if(!document.hidden)keepName();},15*60*1000);
