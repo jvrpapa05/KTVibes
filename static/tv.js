@@ -65,7 +65,7 @@ function render(next){
  const deck=JSON.stringify([queued.length,...queued.slice(0,3).map(i=>[i.singer,i.title,i.artist,i.status==='ready'?'':'prep'])]);  // the % updates in place (deckPercents)
  if(deck!==deckShown){deckShown=deck;
  // The number and the % stay put; only the text between them scrolls (clipped, never behind the number).
- $('on-deck').replaceChildren(...queued.slice(0,3).map((i,n)=>{const row=el('li'),text=el('span',undefined,'deck-text');text.append(...(i.singer?[el('em',`${i.singer}: `,'deck-singer')]:[]),el('b',i.title),el('span',` ${i.artist}`));row.append(text,...(i.status==='ready'?[]:[(()=>{const pct=el('small',`${prepPercent(i,serverSkew)}%`,'deck-pct');pct.dataset.key=i.key;return pct;})()]),el('span',`${n+1}`,'deck-num'));return row;}));  // karaoke-server: number on the right, like the panel
+ $('on-deck').replaceChildren(...queued.slice(0,3).map((i,n)=>{const row=el('li'),text=el('span',undefined,'deck-text');text.append(el('b',i.title),el('span',` ${i.artist}`));row.append(...(i.singer?[el('em',`${i.singer}:`,'deck-singer')]:[]),text,...(i.status==='ready'?[]:[(()=>{const pct=el('small',`${prepPercent(i,serverSkew)}%`,'deck-pct');pct.dataset.key=i.key;return pct;})()]),el('span',`${n+1}`,'deck-num'));return row;}));  // karaoke-server: number on the right, like the panel
  if(queued.length>3)$('on-deck').append(el('li',`+${queued.length-3} more`,'more'));
  if(!queued.length)$('on-deck').append(el('li','Nothing queued','more'));
  marquees('#on-deck .deck-text');}
@@ -554,7 +554,8 @@ function showPhoto(e){
 }
 function hideFun(id){for(const node of document.querySelectorAll('.shout,.polaroid'))if(node.dataset.id===id){node.classList.add('out');setTimeout(()=>node.remove(),600);}}
 
-// karaoke-server: long titles scroll: the now-playing title/artist at the top and the Up next list.
+// karaoke-server: long titles scroll: the now-playing title/artist at the top and the Up next list (only the song's
+// title and artist; the singer's name and the number stay still, user 2026-11-22).
 const TV_MARQUEES='#song-title,#song-artist,#on-deck .deck-text';
 setInterval(()=>marquees(TV_MARQUEES),1500);addEventListener('resize',()=>marquees(TV_MARQUEES));
 
