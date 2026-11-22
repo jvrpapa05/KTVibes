@@ -17,7 +17,9 @@ function toast(text,action,kind){
 const sendRaw=connect('remote',render,message=>toast(message,undefined,'err'),undefined,event=>onFun(event));
 // karaoke-server: settings carry who's changing them; the server saves them to that singer's profile (live only on their own song).
 const PROFILE_ACTIONS=new Set(['vocal','music','key','speed','lyric_scale','video_mode','lyric_mode']);
-const send=message=>sendRaw(PROFILE_ACTIONS.has(message.action)&&singer()?{...message,singer:singer(),device:deviceId()}:message);
+// karaoke-server: pause, play and skip carry who did it too, so the TV can say so ("Paused by Ana")
+const NAMED_ACTIONS=new Set(['play','pause','skip']);
+const send=message=>sendRaw((PROFILE_ACTIONS.has(message.action)||NAMED_ACTIONS.has(message.action))&&singer()?{...message,singer:singer(),device:deviceId()}:message);
 // What the settings sheet shows: the room while it's your song (or a song without a name), otherwise your own profile.
 function editingOwn(){const me=singer().toLowerCase(),on=(state?.current?.singer||'').toLowerCase();return !!me&&(!state?.current||(!!on&&on!==me));}
 function view(){if(!editingOwn())return state;const mine=state.profiles?.[singer().toLowerCase()];return {...state,...(mine||{})};}

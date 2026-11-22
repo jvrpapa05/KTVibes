@@ -104,6 +104,19 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         await state.control({'action': 'guide', 'value': 'cycle'})
         self.assertEqual(state.guide, 'latin')
 
+    async def test_pause_and_skip_say_who(self):
+        # karaoke-server (user, 2026-11-22): "When someone paused ... it feels like the tv just lagged ... identify who"
+        state = State()
+        state.claim_singer('Ana', 'phone-ana-1')
+        a = await state.add('abcdefghijk', 'A', 'First'); a['status'] = 'ready'
+        state.promote()
+        await state.control({'action': 'pause', 'singer': 'Ana', 'device': 'phone-ana-1'})
+        self.assertEqual(state.snapshot()['paused_by'], 'Ana')
+        await state.control({'action': 'play', 'singer': 'Ana', 'device': 'phone-ana-1'})
+        self.assertEqual(state.snapshot()['paused_by'], '')
+        await state.control({'action': 'pause', 'singer': 'Ana', 'device': 'someone-else-1'})  # not Ana's phone
+        self.assertEqual(state.snapshot()['paused_by'], 'Someone')
+
     async def test_video_always_shows(self):
         # karaoke-server (user, 2026-11-22): "simplify the display ... remove blur and hide"
         state = State()

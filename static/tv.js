@@ -52,13 +52,13 @@ function setAmbient(on){
 }
 ambient.onended=nextAmbient;
 ambient.onerror=()=>{if(!ambientOn)return;ambientIds=ambientIds.filter(id=>id!==ambient.dataset.id);nextAmbient();};
-const send=connect('tv',render,error,()=>{restoring=true;send({action:'audio',value:enabled});if(currentKey&&finishedKey===currentKey)send({action:'ended',key:currentKey});},event=>{if(event.type==='react')cheer(event.value);else if(event.type==='shout')showShout(event);else if(event.type==='photo')showPhoto(event);else if(event.type==='hide')hideFun(event.id);else if(event.type==='dial')dial(event.digits);else if(event.type==='reserved')reserved(event.number);});
+const send=connect('tv',render,error,()=>{restoring=true;send({action:'audio',value:enabled});if(currentKey&&finishedKey===currentKey)send({action:'ended',key:currentKey});},event=>{if(event.type==='react')cheer(event.value);else if(event.type==='shout')showShout(event);else if(event.type==='photo')showPhoto(event);else if(event.type==='hide')hideFun(event.id);else if(event.type==='dial')dial(event.digits);else if(event.type==='reserved')reserved(event.number);else if(event.type==='control')showControl(event);});
 function saved(){try{return JSON.parse(localStorage.getItem(SETTINGS))||{};}catch{return {};}}
 function remember(s){try{localStorage.setItem(SETTINGS,JSON.stringify(Object.fromEntries(SETTING_KEYS.map(k=>[k,s[k]]))));}catch{}}
 function restore(s){const mine=saved();for(const action of SETTING_KEYS){const value=mine[action];if(value!==undefined&&value!==s[action])send({action,value});}}
 api('/api/config').then(c=>$('remote-url').textContent=$('sticker-url').textContent=c.remote_url).catch(e=>error(e.message));
 function render(next){
- state=next;if(state.version)$('app-version').textContent=`v${state.version}`;showPhones(state.phones);showAfter(state);if(restoring){restoring=false;restore(state);}else remember(state);if(state.guide!==guide){if(guide!==undefined)showGuideBadge(state.guide);guide=state.guide;document.body.dataset.guide=guide;}showChanges(state);showQueueChange(state);document.body.style.setProperty('--lyric-scale',state.lyric_scale??1.5);document.body.dataset.video=state.video_mode||'show';document.body.dataset.lyrics=state.lyric_mode||'two';document.body.dataset.theme=state.theme||'default';for(const b of document.querySelectorAll('[data-theme-pick]'))b.setAttribute('aria-pressed',b.dataset.themePick===document.body.dataset.theme);showClassicBar(state);showSpecs(state);showBoot();roomClock();serverSkew=state.server_time-Date.now()/1000;$('tv-play').classList.toggle('paused',!state.playing);$('tv-play').setAttribute('aria-label',state.playing?'Pause':'Play');$('tv-guide').textContent=GUIDE_BADGES[state.guide]?.[0]??'Aa';$('tv-guide').hidden=(state.guides||[]).length<2;syncRanges();applyGain();
+ state=next;if(state.version)$('app-version').textContent=`v${state.version}`;showPhones(state.phones);showAfter(state);if(restoring){restoring=false;restore(state);}else remember(state);if(state.guide!==guide){if(guide!==undefined)showGuideBadge(state.guide);guide=state.guide;document.body.dataset.guide=guide;}showChanges(state);showQueueChange(state);showPaused(state);document.body.style.setProperty('--lyric-scale',state.lyric_scale??1.5);document.body.dataset.video=state.video_mode||'show';document.body.dataset.lyrics=state.lyric_mode||'two';document.body.dataset.theme=state.theme||'default';for(const b of document.querySelectorAll('[data-theme-pick]'))b.setAttribute('aria-pressed',b.dataset.themePick===document.body.dataset.theme);showClassicBar(state);showSpecs(state);showBoot();roomClock();serverSkew=state.server_time-Date.now()/1000;$('tv-play').classList.toggle('paused',!state.playing);$('tv-play').setAttribute('aria-label',state.playing?'Pause':'Play');$('tv-guide').textContent=GUIDE_BADGES[state.guide]?.[0]??'Aa';$('tv-guide').hidden=(state.guides||[]).length<2;syncRanges();applyGain();
  const queued=state.upcoming.filter(i=>i.status!=='error');
  // karaoke-server: rebuild only when what it shows changes (a rebuild restarts the scrolling of long titles),
  // and start scrolling the new rows straight away.
@@ -499,6 +499,18 @@ function showBadge(icon,name,value,range,art){
  const glyph=$('guide-icon');glyph.classList.remove('pop');void glyph.offsetWidth;glyph.classList.add('pop');
  if(!visible){osd.classList.remove('in');void osd.offsetWidth;osd.classList.add('in');}
  badgeTimer=setTimeout(()=>{osd.classList.add('out');osd.addEventListener('animationend',()=>{if(osd.classList.contains('out')){osd.hidden=true;osd.classList.remove('out','in');}},{once:true});},1600);
+}
+// karaoke-server (user, 2026-11-22): a pause or skip is announced with who did it, so it never feels like a lag.
+// Paused: a badge stays up until the song plays again. Resumed / skipped: the usual notice card.
+function showControl(e){
+ const by=e.name?` by ${e.name}`:'';
+ if(e.action==='play')showBadge('▶',`Resumed${by}`,e.title,null,e.id);
+ else if(e.action==='skip')showBadge('⏭',`Skipped${by}`,e.title,null,e.id);
+}
+function showPaused(s){
+ const on=!!s.current&&!s.playing&&s.current.status==='ready',badge=$('pause-badge');
+ if(on){const text=s.paused_by?`Paused by ${s.paused_by}`:'Paused';if($('pause-text').textContent!==text)$('pause-text').textContent=text;}
+ badge.hidden=!on;
 }
 function showUpNext(){
  if(REDUCED.matches)return;

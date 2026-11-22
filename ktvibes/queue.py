@@ -117,6 +117,7 @@ class State:
         self.lyrics_sent = {}  # TV socket -> key of the song whose lyrics it already has
         self.lyrics_applying = {}  # karaoke-server: song id -> {"version", "started"} while new lyrics are timed in the background
         self.vote = None  # karaoke-server: the open "lyrics in sync?" vote (see VOTE_WAIT)
+        self.paused_by = ""  # karaoke-server: who paused the song (shown on the TV while paused)
         self.owners = {}  # karaoke-server: queue item key -> device of the phone that queued it (never sent to phones)
 
     def guides(self):
@@ -139,7 +140,7 @@ class State:
                 "player_connected": self.player is not None, "player_audio": self.player is not None and self.audio,
                 "revision": self.revision, "build": self.build, "version": VERSION, "phones": sum(role == "remote" for role in self.clients.values()),
                 "lyrics_applying": {k: {"version": v["version"], "started": v["started"]} for k, v in self.lyrics_applying.items()},
-                "vote": self.vote_summary()}
+                "vote": self.vote_summary(), "paused_by": self.paused_by if not self.playing else ""}
 
     # karaoke-server: the lyrics vote ------------------------------------------------------------------------------
     def vote_voters(self):
@@ -198,6 +199,21 @@ class State:
         votes = list(vote["votes"].values())
         return {"key": vote["key"], "at": round(vote["opened"]), "up": votes.count("up"), "down": votes.count("down"),
                 "why": {w: list(vote["why"].values()).count(w) for w in VOTE_WHY if w in vote["why"].values()}}
+
+    async def announce(self, action, message, sender):
+        """karaoke-server (user, 2026-11-22): a pause or skip should be seen, with who did it, not feel like a lag.
+        The name is the phone's singer name (when the phone holds it), "TV" for the TV's own buttons."""
+        if sender is not None and sender is self.player:
+            name = "TV"
+        else:
+            holder = self.singers.get(" ".join(str(message.get("singer") or "").split()).casefold())
+            name = holder["name"] if holder and holder["device"] == message.get("device") else ""
+        if action == "pause":
+            self.paused_by = name or "Someone"
+        item = self.current
+        if self.player is not None and item:
+            await self.send(self.player, {"type": "control", "action": action, "name": name, "title": item["title"], "id": item["id"]})
+        metrics.record("control", action=action, by=name or "", song=(item or {}).get("id"))
 
     def save_vote(self, video_id, record):
         """karaoke-server: keep each song's votes in its meta.json, tied to the lyrics they were about (lyrics.lrc)."""
@@ -573,8 +589,11 @@ class State:
             if self.player is not None:
                 await self.send(self.player, {"type": "reserved", "number": wanted})
             return
+        if action in ("play", "pause", "skip"):
+            await self.announce(action, message, sender)
         if action == "play":
             self.playing = True
+            self.paused_by = ""
         elif action == "pause":
             self.playing = False
         elif action == "skip" or action == "ended":
