@@ -11,7 +11,7 @@ import uuid
 from . import songbook, metrics
 
 DISPLAY = {"video_mode": ("show", "blur", "hide"), "lyric_mode": ("two", "scroll", "off"), "theme": ("default",),
-           "lyric_video": ("scenery", "video")}  # karaoke-server: what plays on a lyric or audio video's song (see scenery.py)  # karaoke-server: Classic theme removed (English-only users)
+           "lyric_video": ("scenery", "video"), "family": ("off", "on")}  # karaoke-server: what plays on a lyric or audio video's song (see scenery.py)  # karaoke-server: Classic theme removed (English-only users)
 def following(options, current):
     """The option after `current`, wrapping round: what a "cycle" control switches to."""
     return options[(options.index(current) + 1) % len(options)]
@@ -92,6 +92,7 @@ class State:
         self.lyric_scale = 1.5
         self.video_mode = "show"  # show | blur | hide: blur suits lyric videos, whose own lyrics clash
         self.lyric_video = "scenery"  # karaoke-server: scenery | video, for songs whose video is a lyric video or audio upload
+        self.family = "off"  # karaoke-server: Family-friendly mode: songs Spotify marks explicit are left out (user, 2026-11-26)
         self.scenery = None  # karaoke-server: scenery.Scenery, set at startup
         self.lyric_mode = "two"  # two (classic two-line KTV) | scroll | off
         self.theme = "default"  # default | classic (Korean noraebang look, with a room timer)
@@ -135,7 +136,7 @@ class State:
         """Lyrics are large and only the TV draws them, so broadcasts leave them out (see broadcast)."""
         brief = lambda item: item if lyrics or item is None else {k: v for k, v in item.items() if k != "lyrics"}
         return {"current": brief(self.current), "upcoming": [brief(i) for i in self.upcoming], "playing": self.playing,
-                "offset": self.offset, "vocal": self.vocal, "music": self.music, "guide": self.guide, "guides": self.guides(), "lyric_scale": self.lyric_scale, "video_mode": self.video_mode, "lyric_mode": self.lyric_mode, "lyric_video": self.lyric_video, "theme": self.theme, "room_ends": self.room_ends, "time_up": self.time_up(), "profiles": self.profiles, "speed": self.speed, "key": self.key, "seek_id": self.seek_id, "position": self.position,
+                "offset": self.offset, "vocal": self.vocal, "music": self.music, "guide": self.guide, "guides": self.guides(), "lyric_scale": self.lyric_scale, "video_mode": self.video_mode, "lyric_mode": self.lyric_mode, "lyric_video": self.lyric_video, "family": self.family, "theme": self.theme, "room_ends": self.room_ends, "time_up": self.time_up(), "profiles": self.profiles, "speed": self.speed, "key": self.key, "seek_id": self.seek_id, "position": self.position,
                 "transition_until": self.transition_until, "server_time": time.time(),
                 "player_connected": self.player is not None, "player_audio": self.player is not None and self.audio,
                 "revision": self.revision, "build": self.build, "version": VERSION, "phones": sum(role == "remote" for role in self.clients.values()),
@@ -246,6 +247,7 @@ class State:
         self.singers = saved["singers"] if isinstance(saved.get("singers"), dict) else {}
         self.profiles = saved["profiles"] if isinstance(saved.get("profiles"), dict) else {}
         self.lyric_video = saved.get("lyric_video") if saved.get("lyric_video") in DISPLAY["lyric_video"] else "scenery"
+        self.family = saved.get("family") if saved.get("family") in DISPLAY["family"] else "off"
         self.room_ends = float(saved["room_ends"]) if self.theme == "classic" and isinstance(saved.get("room_ends"), (int, float)) else None
         entries = saved.get("upcoming", [])
         if saved.get("current"):
@@ -265,7 +267,7 @@ class State:
         brief = lambda i: {"id": i["id"], "artist": i["artist"], "title": i["title"], "singer": i.get("singer", ""), "device": self.owners.get(i["key"], "")}
         data = {"current": self.current and {**brief(self.current), "position": self.position},
                 "upcoming": [brief(i) for i in self.upcoming if i["status"] != "error"], "played": self.played,
-                "theme": self.theme, "room_ends": self.room_ends, "singers": self.singers, "profiles": self.profiles, "lyric_video": self.lyric_video}
+                "theme": self.theme, "room_ends": self.room_ends, "singers": self.singers, "profiles": self.profiles, "lyric_video": self.lyric_video, "family": self.family}
         temporary = self.path.with_suffix(".tmp")
         temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         temporary.replace(self.path)

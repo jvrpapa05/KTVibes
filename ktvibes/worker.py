@@ -340,6 +340,15 @@ async def run(state, cache: Path):
             expect_step(item, "syncing", item["duration"])
             syncing_from = time.monotonic()
             await state.broadcast()
+            # karaoke-server: the song on Spotify, looked up once (kept in meta.json): album cover, exact length,
+            # explicit flag (Family-friendly mode) and year
+            if "spotify" not in meta and spotify.enabled():
+                try:
+                    found = await asyncio.to_thread(spotify.find_track, item["artist"], item["title"])
+                    meta["spotify"] = {k: found[k] for k in ("id", "duration", "explicit", "year")} if found else {}
+                    meta["cover"] = found["cover"] if found else ""
+                except Exception:
+                    log.warning("Spotify lookup failed for %s", item["id"], exc_info=True)
             identity = [item["artist"], item["title"]]
             cached = (folder / "lyrics.lrc").read_text(encoding="utf-8") if (folder / "lyrics.lrc").is_file() else ""
             raw = ""
@@ -351,7 +360,7 @@ async def run(state, cache: Path):
                 pass  # LRCLIB had none recently; "Lyrics language…" on the remote still searches
             else:
                 try:
-                    result = await lyrics.fetch(*identity, item["duration"], (meta.get("source_title") or "",))
+                    result = await lyrics.fetch(*identity, item["duration"], (meta.get("source_title") or "",), (meta.get("spotify") or {}).get("duration"))
                     raw, item["lyrics"] = result["raw"], result["lines"]
                     meta["lyrics_duration"] = result.get("duration")
                     # A miss is remembered for a week, so a later LRCLIB addition is still picked up.
@@ -381,13 +390,9 @@ async def run(state, cache: Path):
             # scenery may replace a lyric video (its own words clash) or an audio upload (a still picture), user 2026-11-22
             item["scenery_ok"] = item["kind"] in ("lyric", "audio")
             # karaoke-server: the album cover from Spotify, looked up once per song (kept in meta.json)
-            if "cover" not in meta and spotify.enabled():
-                try:
-                    meta["cover"] = await asyncio.to_thread(spotify.album_cover, item["artist"], item["title"])
-                except Exception:
-                    log.warning("No album cover for %s", item["id"], exc_info=True)
             if meta.get("cover"):
                 item["cover"] = meta["cover"]
+            item["explicit"] = bool((meta.get("spotify") or {}).get("explicit"))
             meta.update(duration=item["duration"], artist=item["artist"], title=item["title"])
             item["number"] = songbook.assign(cache, meta)
             save_meta(folder, meta)

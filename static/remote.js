@@ -534,7 +534,7 @@ async function loadPage(){
   // karaoke-server: only playable versions come back, so an empty page doesn't mean the next one is empty too
   $('more').hidden=search.page>=9;$('results').dataset.state=search.seen.size?'':'none';
   $('results-end').hidden=!$('more').hidden||!search.seen.size;
-  if(!search.seen.size&&!$('results').querySelector('.empty'))$('results').append(emptyNote('없음','검색 결과가 없어요','No karaoke-ready version yet. Only versions whose lyrics line up are shown: add the artist, check the spelling, or tap More results.'));
+  if(!search.seen.size&&!$('results').querySelector('.empty'))$('results').append(emptyNote('없음','검색 결과가 없어요',`No karaoke-ready version yet. Only versions whose lyrics line up are shown${state?.family==='on'?' (and Family-friendly mode hides explicit songs)':''}: add the artist, check the spelling, or tap More results.`));
   if(search.seen.size)$('results').querySelector('.empty')?.remove();
   if(first)showResults();
  }catch(error){if(run!==searchRun)return;searchWaitTimers.forEach(clearTimeout);if(first){$('results').replaceChildren();$('results').dataset.state='';}toast(error.message,undefined,'err');}finally{$('more').disabled=false;$('more').textContent='More results';}

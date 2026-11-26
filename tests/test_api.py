@@ -270,6 +270,23 @@ class APITests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn('lyrics', response.json()['detail'])
 
+    def test_family_friendly_mode_keeps_explicit_songs_out(self):
+        # karaoke-server (user, 2026-11-26): Family-friendly mode leaves out songs Spotify marks explicit
+        folder = Path(self.temp.name) / 'xxxxxxxxxxx'
+        folder.mkdir()
+        (folder / 'meta.json').write_text('{"artist": "A", "title": "Rude", "spotify": {"explicit": true}}', encoding='utf-8')
+        for name in ('no_vocals.wav', 'vocals.wav'):
+            (folder / name).touch()
+        (folder / 'timed.json').write_text('{"lines": [{"t": 1, "text": "a"}]}', encoding='utf-8')
+        self.main.state.family = 'on'
+        try:
+            response = self.client.post('/api/queue', json={'id': 'xxxxxxxxxxx', 'artist': 'A', 'title': 'Rude'})
+            self.assertEqual(response.status_code, 409)
+            self.assertIn('Family-friendly', response.json()['detail'])
+        finally:
+            self.main.state.family = 'off'
+        self.assertEqual(self.client.post('/api/queue', json={'id': 'xxxxxxxxxxx', 'artist': 'A', 'title': 'Rude'}).status_code, 201)
+
     def test_library_songs_are_offered_only_when_their_lyrics_line_up(self):
         # karaoke-server: same rule as search results; measured first-line error for prepared songs
         def song(vid, duration, lyrics_duration=None, entry=None, lines=True):

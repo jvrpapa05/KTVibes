@@ -270,10 +270,11 @@ def order_results(results: list[dict], query: str = "") -> list[dict]:
         asked = 0 if wanted and len(name) >= 2 and name in wanted else 1
         if r.get("lyrics_match"):
             # lyrics for the whole song before lyrics that stop partway, whatever the kind of video
-            return (asked, 0, bool(r.get("lyrics_partial")), KIND_ORDER[kind], r.get("lyrics_diff", 0), 0)
+            # karaoke-server: then the plain recording: a video as long as Spotify's version of the song (set by search)
+            return (asked, 0, bool(r.get("lyrics_partial")), not r.get("spotify_fit"), KIND_ORDER[kind], r.get("lyrics_diff", 0), 0)
         if kind != "official":
-            return (asked, 1, False, KIND_ORDER[kind], 0, 0)
-        return (asked, 1, False, 0, first[song(r)], r.get("duration") or float("inf"))
+            return (asked, 1, False, True, KIND_ORDER[kind], 0, 0)
+        return (asked, 1, False, True, 0, first[song(r)], r.get("duration") or float("inf"))
     return sorted(results, key=key)
 
 def _extract(options: dict, video_id: str, progress=None, attempts: int = 4) -> dict:

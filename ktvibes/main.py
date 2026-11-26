@@ -138,6 +138,8 @@ async def search(q: str = Query(min_length=1, max_length=200), page: int = Query
         # karaoke-server: the free-text lookup runs while YouTube answers; the artist + song lookups start as soon as
         # YouTube's names are known, alongside it (not after it), so a slow LRCLIB costs one wait, not two.
         by_query = asyncio.ensure_future(lyric_records(q, pending=pending))
+        # karaoke-server: Spotify's version of the song (exact length, explicit flag), looked up meanwhile
+        on_spotify = asyncio.ensure_future(asyncio.wait_for(asyncio.to_thread(spotify.search_tracks, q, 3), 4)) if spotify.enabled() and page == 0 else None
         found = await asyncio.to_thread(youtube.search, q, page)
         # A free-text lookup lists ~20 records, so a song can be missed ("Why" has many). Also ask about the most
         # likely versions by artist + song (at most 3). The names most results agree on first ("good girls 5sos":
@@ -172,6 +174,11 @@ async def search(q: str = Query(min_length=1, max_length=200), page: int = Query
             if late:
                 records = list({c.get("id") or id(c): c for c in records + late}.values())
                 check_lyrics(found, records)
+        target = await spotify_song(on_spotify, found, q)
+        if target:
+            for r in found:
+                r["spotify_fit"] = bool(r.get("duration")) and abs(r["duration"] - target["duration"]) <= youtube.LYRICS_TOLERANCE \
+                    and youtube.song_name((r.get("parsed") or {}).get("title", "")) == youtube.song_name(target["title"])
         results = youtube.order_results(found, q)
     except Exception as exc:
         metrics.record("search_failed", q=q, page=page, error=str(exc)[-200:], bot_check=bool(youtube.BOT_CHECK.search(str(exc))))
@@ -187,8 +194,25 @@ async def search(q: str = Query(min_length=1, max_length=200), page: int = Query
     # karaoke-server: matching songs from our own library first (first page only)
     mine = [{**s, "cached": True} for s in library_matches(q)] if page == 0 else []
     playable = mine + [r for r in playable if r["id"] not in {s["id"] for s in mine}]
+    # karaoke-server: Family-friendly mode (Display setting): songs Spotify marks explicit are left out
+    if state.family == "on":
+        rude = youtube.song_name(target["title"]) if target and target.get("explicit") else None
+        playable = [r for r in playable if not (r.get("library") and r.get("explicit"))
+                    and not (rude and youtube.song_name((r.get("parsed") or {}).get("title", "")) == rude)]
     metrics.record("search_playable", q=q, page=page, shown=len(playable), hidden=len(results) - len(playable), library=len(mine))
     return playable
+
+async def spotify_song(task, found: list[dict], q: str) -> dict | None:
+    """karaoke-server: the Spotify song this search is about: the best of its answers whose song is among the YouTube
+    results (so a different song never sets the length); None without Spotify or an answer in time."""
+    if task is None:
+        return None
+    try:
+        songs = await task
+    except Exception:
+        return None
+    names = {youtube.song_name((r.get("parsed") or {}).get("title", "")) for r in found}
+    return next((song for song in songs if youtube.song_name(song["title"]) in names), None)
 
 def needs_official(found: list[dict]) -> bool:
     """karaoke-server: the page has no official video of the song(s) it found lyrics for (or, with none, of any)."""
@@ -246,6 +270,7 @@ def prepared_songs() -> dict:
         if youtube.ID.fullmatch(video_id) and meta.get("artist") and meta.get("title") and stems.prepared(meta_path.parent):
             songs[video_id] = {"id": video_id, "artist": meta["artist"], "title": meta["title"], "duration": meta.get("duration"),
                                "thumbnail": meta.get("cover") or f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg", "prepared": prepared, "number": meta.get("number"),
+                               "explicit": bool((meta.get("spotify") or {}).get("explicit")),
                                "source_title": meta.get("source_title") or ""}
     return songs
 
@@ -301,20 +326,22 @@ def library_matches(q: str, limit: int = 3) -> list[dict]:
     found = unique
     return [{"id": s["id"], "title": title(s), "channel": s["artist"], "duration": s["duration"], "thumbnail": s["thumbnail"],
              "kind": youtube.kind(title(s), s["artist"], s["artist"]), "parsed": {"artist": s["artist"], "title": s["title"]},
-             "lyrics_match": True, "library": True} for *_, s in found[:limit]]
+             "lyrics_match": True, "library": True, "explicit": s.get("explicit", False)} for *_, s in found[:limit]]
 
 @app.get("/api/recent")
 async def recent(limit: int = Query(20, ge=1, le=50)):
     """Songs that went on stage, most recent first, so the remote can re-queue them without a search."""
     songs = prepared_songs()
     # karaoke-server: only songs that can be sung (lyrics that line up), like search
-    played = sorted((when, video_id) for video_id, when in state.played.items() if video_id in songs and lines_up(video_id))
+    played = sorted((when, video_id) for video_id, when in state.played.items() if video_id in songs and lines_up(video_id)
+                    and not (state.family == "on" and songs[video_id]["explicit"]))
     return [{k: v for k, v in songs[video_id].items() if k != "prepared"} for _, video_id in reversed(played[-limit:])]
 
 @app.get("/api/songbook")
 async def songbook_list():
     """Prepared songs by songbook number, for the remote's keypad and songbook (with when each was prepared, for 신곡)."""
-    return sorted((s for s in prepared_songs().values() if s.get("number") and lines_up(s["id"])), key=lambda s: s["number"])  # karaoke-server: singable only
+    return sorted((s for s in prepared_songs().values() if s.get("number") and lines_up(s["id"]) and not (state.family == "on" and s["explicit"])),
+                  key=lambda s: s["number"])  # karaoke-server: singable only (and clean in Family-friendly mode)
 
 @app.get("/api/ambient")
 async def ambient():
@@ -441,8 +468,11 @@ async def enqueue(song: Song):
         raise HTTPException(409, "Queue is full")
     # karaoke-server (beta 2026-11-22): a song in our library without lyrics that line up can't be queued, whichever
     # list it came from (search already lists only playable versions)
-    if song.id in prepared_songs() and not lines_up(song.id):
+    library = prepared_songs()
+    if song.id in library and not lines_up(song.id):
         raise HTTPException(409, "This song has no lyrics that line up, so it can't be sung")
+    if state.family == "on" and song.id in library and library[song.id]["explicit"]:
+        raise HTTPException(409, "Family-friendly mode is on: this song is marked explicit")
     try:
         singer = state.claim_singer(song.singer, song.device) if song.singer else ""
         item = await state.add(song.id, song.artist, song.title, singer, song.device if singer else "", song.kind)

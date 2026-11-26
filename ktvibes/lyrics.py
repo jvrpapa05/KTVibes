@@ -485,8 +485,10 @@ def uncovered(samples, rate: int, lines: list[dict], duration: float | None = No
             out.append([round(lo, 1), round(hi, 1)])
     return out
 
-def real_lengths(records: list[dict]) -> None:
-    """Set record["length"]: the real length of the recording its timing fits, or None if it can't fit any."""
+def real_lengths(records: list[dict], known: float | None = None) -> None:
+    """Set record["length"]: the real length of the recording its timing fits, or None if it can't fit any.
+    karaoke-server: `known` is the recording's exact length from Spotify, when there is one: where a group's labels
+    disagree, the label agreeing with it (within 3 s) is the group's length."""
     import statistics
     groups = []
     for c in records:
@@ -507,6 +509,8 @@ def real_lengths(records: list[dict]) -> None:
             # karaoke-server: no two labels agree near the middle ("Bakas Ng Talampakan": 246 and 462 s, a median
             # of 354 s is neither): the label ending closest after the last line
             typical = min(stated, key=lambda d: d - g["last"])
+        if known and any(abs(d - known) <= 3 for d in stated) and any(abs(d - known) > 3 for d in stated) and g["last"] <= known + 3:
+            typical = min(stated, key=lambda d: abs(d - known))  # Spotify settles it
         for c in g["members"]:
             # one odd label in a group is corrected to the group's length; agreeing records keep their own
             c["length"] = float(c["duration"]) if abs(float(c["duration"]) - typical) <= 3 else typical
@@ -654,7 +658,7 @@ async def candidates(artist: str, title: str, duration: float, hints: tuple[str,
         want = max(("ko", "zh", "ja"), key=votes.count) if votes else None
     return sorted(unique.values(), key=lambda c: rank(c, titles, duration, want))
 
-async def fetch(artist: str, title: str, duration: float, hints: tuple[str, ...] = ()) -> dict:
+async def fetch(artist: str, title: str, duration: float, hints: tuple[str, ...] = (), known: float | None = None) -> dict:
     matches = await candidates(artist, title, duration, hints)
     if not matches:  # karaoke-server: one more, thorough look before saying there are none
         matches = await candidates(artist, title, duration, hints, exhaustive=True)
@@ -666,8 +670,8 @@ async def fetch(artist: str, title: str, duration: float, hints: tuple[str, ...]
         try:
             async with lrclib() as client:
                 more = (await client.get("/api/search", params={"artist_name": artist, "track_name": title})).json()
-            known = {c.get("id") for c in matches}
-            real_lengths([c for c in matches + [m for m in more if m.get("id") not in known] if c.get("syncedLyrics")])
+            ids = {c.get("id") for c in matches}
+            real_lengths([c for c in matches + [m for m in more if m.get("id") not in ids] if c.get("syncedLyrics")], known)
         except Exception:  # LRCLIB slow or down: keep the candidates' own lengths
             pass
     raw = matches[0].get("syncedLyrics", "") if matches else ""

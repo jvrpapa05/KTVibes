@@ -783,6 +783,41 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
             self.assertEqual(spotify.album_cover("Someone Else", "Palagi"), "")           # another artist's "Palagi": no
             self.assertEqual(spotify.album_cover("TJ Monterde", "Ikaw at Ako"), "")       # another song: no
 
+    def test_spotify_length_settles_and_sorts(self):
+        # karaoke-server (user, 2026-11-26): Spotify's exact length checks lyric labels and puts the plain recording first
+        from ktvibes.lyrics import real_lengths
+        from ktvibes.youtube import mark_lyrics, order_results, song_name
+        rec = lambda d: {"duration": d, "syncedLyrics": "[00:00.57]a\n[03:20.35]b"}
+        records = [rec(218), rec(238), rec(238)]              # one timing; two uploads labelled it with a video's 238 s
+        real_lengths(records); self.assertEqual([r["length"] for r in records], [238.0, 238.0, 238.0])   # outvoted alone
+        records = [rec(218), rec(238), rec(238)]
+        real_lengths(records, known=218.1); self.assertEqual([r["length"] for r in records], [218.0, 218.0, 218.0])  # Spotify settles it
+        r = lambda i, kind, d: {"id": i, "kind": kind, "title": "Palagi", "duration": d, "parsed": {"title": "Palagi"}}
+        results = [r("mv", "official", 238), r("lyric", "lyric", 219)]
+        mark_lyrics(results, [(song_name("Palagi"), 238.0), (song_name("Palagi"), 218.0)])
+        results[1]["spotify_fit"] = True                      # as long as Spotify's recording
+        self.assertEqual([x["id"] for x in order_results(results)], ["lyric", "mv"])
+        results[1]["spotify_fit"] = False
+        self.assertEqual([x["id"] for x in order_results(results)], ["mv", "lyric"])   # without it: official first, as before
+
+    def test_spotify_rate_limit_is_respected(self):
+        # karaoke-server (2026-11-26): after a 429, no calls to Spotify until its Retry-After has passed
+        import email.message, urllib.error, urllib.request
+        from ktvibes import spotify
+        headers = email.message.Message(); headers["Retry-After"] = "120"
+        calls = []
+        def refuse(*a, **k):
+            calls.append(1); raise urllib.error.HTTPError("u", 429, "Too Many Requests", headers, None)
+        with unittest.mock.patch.dict(os.environ, {"SPOTIFY_CLIENT_ID": "x", "SPOTIFY_CLIENT_SECRET": "y"}), \
+             unittest.mock.patch.object(urllib.request, "urlopen", refuse), unittest.mock.patch.object(spotify, "_quiet_until", 0.0):
+            self.assertTrue(spotify.enabled())
+            with self.assertRaises(spotify.Resting):
+                spotify._open(urllib.request.Request("https://api.spotify.com/v1/search"), 4)
+            self.assertFalse(spotify.enabled())                    # callers skip Spotify meanwhile
+            with self.assertRaises(spotify.Resting):
+                spotify._open(urllib.request.Request("https://api.spotify.com/v1/search"), 4)
+            self.assertEqual(len(calls), 1)                        # the second try never reached Spotify
+
     def test_accents_do_not_stop_a_match(self):
         # karaoke-server: 5,000-song study (2026-11-22): "GIVĒON - Heartbreak Anniversary (Official Music Video)" vs
         # LRCLIB's "Giveon", and "MÍA" vs "MIA": the official video was passed over
