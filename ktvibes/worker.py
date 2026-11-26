@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 import soundfile as sf
-from . import align, guides, songbook, stems, youtube, lyrics, metrics
+from . import align, guides, songbook, spotify, stems, youtube, lyrics, metrics
 
 log = logging.getLogger(__name__)
 TIMING_VERSION = 10  # bump when alignment or guide output changes, so cached timing is rebuilt
@@ -380,6 +380,14 @@ async def run(state, cache: Path):
             item["kind"] = meta["kind"] = item.get("kind") or meta.get("kind") or youtube.kind(meta.get("source_title") or "")
             # scenery may replace a lyric video (its own words clash) or an audio upload (a still picture), user 2026-11-22
             item["scenery_ok"] = item["kind"] in ("lyric", "audio")
+            # karaoke-server: the album cover from Spotify, looked up once per song (kept in meta.json)
+            if "cover" not in meta and spotify.enabled():
+                try:
+                    meta["cover"] = await asyncio.to_thread(spotify.album_cover, item["artist"], item["title"])
+                except Exception:
+                    log.warning("No album cover for %s", item["id"], exc_info=True)
+            if meta.get("cover"):
+                item["cover"] = meta["cover"]
             meta.update(duration=item["duration"], artist=item["artist"], title=item["title"])
             item["number"] = songbook.assign(cache, meta)
             save_meta(folder, meta)

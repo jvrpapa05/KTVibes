@@ -57,10 +57,28 @@ def search_tracks(query: str, limit: int = 6) -> list[dict]:
         seen.add(same)
         images = sorted(t.get("album", {}).get("images", []), key=lambda i: i.get("width") or 0)
         art = next((i["url"] for i in images if (i.get("width") or 0) >= 60), images[-1]["url"] if images else "")
-        songs.append({"title": t["name"], "artist": ", ".join(artists), "duration": round(t.get("duration_ms", 0) / 1000, 1), "art": art, "id": t["id"]})
+        cover = next((i["url"] for i in images if (i.get("width") or 0) >= 300), images[-1]["url"] if images else "")
+        songs.append({"title": t["name"], "artist": ", ".join(artists), "duration": round(t.get("duration_ms", 0) / 1000, 1), "art": art,
+                      "cover": cover, "id": t["id"]})
         if len(songs) >= limit:
             break
     if len(_cache) > 500:
         _cache.clear()
     _cache[key] = (time.time(), songs)
     return songs
+
+def album_cover(artist: str, title: str) -> str:
+    """karaoke-server (user, 2026-11-26): the album cover for a song, for the TV and phones (a YouTube thumbnail is a
+    cropped video frame, often with half a title on it). Only when Spotify's song clearly is this one: the same song
+    name and one of its artists named; "" otherwise."""
+    from .youtube import artist_keys, song_name
+    want, keys = song_name(title), artist_keys(artist)
+    if not want or not keys:
+        return ""
+    from .youtube import fold
+    import re
+    plain = lambda text: re.sub(r"\W+", "", fold(text))
+    fits = [song for song in search_tracks(f"{title} {artist}", limit=5) if song_name(song["title"]) == want and keys & artist_keys(song["artist"])]
+    # the exact title first ("Palagi" over "Palagi - TJxKZ Version"), then the same song under another spelling
+    best = next((song for song in fits if plain(song["title"]) == plain(title)), fits[0] if fits else None)
+    return best["cover"] if best else ""

@@ -772,6 +772,17 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         self.assertEqual(len(calls), 2)                                  # one token, one search
         self.assertIn("limit=10", calls[1])                             # never more than the app may ask for
 
+    def test_album_cover_only_for_the_same_song(self):
+        # karaoke-server (user, 2026-11-26): Spotify's album cover on the TV, but never another song's
+        from ktvibes import spotify
+        songs = [{"title": "Palagi - TJxKZ Version", "artist": "TJ Monterde, KZ Tandingan", "cover": "duet"},
+                 {"title": "Palagi", "artist": "TJ Monterde", "cover": "album"}]
+        with unittest.mock.patch.object(spotify, "search_tracks", lambda q, limit=5: songs):
+            self.assertEqual(spotify.album_cover("TJ Monterde", "Palagi"), "album")       # the exact title over the duet version
+            self.assertEqual(spotify.album_cover("TJ Monterde", "Palagi (Live)"), "duet")  # no exact title: the same song still fits
+            self.assertEqual(spotify.album_cover("Someone Else", "Palagi"), "")           # another artist's "Palagi": no
+            self.assertEqual(spotify.album_cover("TJ Monterde", "Ikaw at Ako"), "")       # another song: no
+
     def test_accents_do_not_stop_a_match(self):
         # karaoke-server: 5,000-song study (2026-11-22): "GIVĒON - Heartbreak Anniversary (Official Music Video)" vs
         # LRCLIB's "Giveon", and "MÍA" vs "MIA": the official video was passed over

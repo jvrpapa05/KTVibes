@@ -245,7 +245,7 @@ def prepared_songs() -> dict:
         video_id = meta_path.parent.name
         if youtube.ID.fullmatch(video_id) and meta.get("artist") and meta.get("title") and stems.prepared(meta_path.parent):
             songs[video_id] = {"id": video_id, "artist": meta["artist"], "title": meta["title"], "duration": meta.get("duration"),
-                               "thumbnail": f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg", "prepared": prepared, "number": meta.get("number"),
+                               "thumbnail": meta.get("cover") or f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg", "prepared": prepared, "number": meta.get("number"),
                                "source_title": meta.get("source_title") or ""}
     return songs
 

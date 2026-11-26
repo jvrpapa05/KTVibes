@@ -1,5 +1,5 @@
 import {classicRemote,toastParts,emptyNote,secondsLeft} from './classic-remote.js';
-import {$,el,connect,api,clock,throttle,prepLabel,syncRanges,REDUCED,thumbnail,marquees,prepPercent} from './shared.js';
+import {$,el,connect,api,clock,throttle,prepLabel,syncRanges,REDUCED,thumbnail,noteCovers,marquees,prepPercent} from './shared.js';
 let state,classicUi;
 const SPRING='cubic-bezier(.38,1.21,.22,1)';
 const haptic=pattern=>{try{navigator.vibrate?.(pattern);}catch{}};
@@ -26,7 +26,7 @@ function view(){if(!editingOwn())return state;const mine=state.profiles?.[singer
 let skew=0;  // server clock minus ours, for the progress estimate
 let lyricsWatch=null;
 function render(next){
- const before=state;state=next;state.received=Date.now()/1000;if(state.server_time)skew=state.server_time-state.received;
+ const before=state;state=next;noteCovers(state);state.received=Date.now()/1000;if(state.server_time)skew=state.server_time-state.received;
  // karaoke-server: background lyrics apply finished (or the song moved on)
  if(lyricsWatch&&!state.lyrics_applying?.[lyricsWatch.id]){
   const w=lyricsWatch;lyricsWatch=null;

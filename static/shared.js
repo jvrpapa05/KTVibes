@@ -47,7 +47,11 @@ export async function api(path, options){
   if(!response.ok)throw new Error(typeof data.detail==='string'?data.detail:'Please check the song details.');return data;
 }
 export const REDUCED = matchMedia('(prefers-reduced-motion: reduce)');
-export const thumbnail = (id, size='mqdefault') => `https://i.ytimg.com/vi/${id}/${size}.jpg`;
+// karaoke-server: a song's picture: its Spotify album cover when the server found one (noted from each state with
+// noteCovers), otherwise the YouTube thumbnail
+const covers = new Map();
+export function noteCovers(state){for(const item of [state?.current,...(state?.upcoming||[])])if(item?.cover)covers.set(item.id,item.cover);}
+export const thumbnail = (id, size='mqdefault') => covers.get(id) || `https://i.ytimg.com/vi/${id}/${size}.jpg`;
 export const clock = seconds => `${Math.floor((seconds||0)/60)}:${String(Math.floor((seconds||0)%60)).padStart(2,'0')}`;
 // Sliders fire many input events; send at most one every `ms`, always ending on the final value.
 export function throttle(fn, ms=120){let last=0,timer;return value=>{clearTimeout(timer);const wait=last+ms-Date.now();if(wait<=0){last=Date.now();fn(value);}else timer=setTimeout(()=>{last=Date.now();fn(value);},wait);};}
