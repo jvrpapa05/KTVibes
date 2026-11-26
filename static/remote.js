@@ -550,14 +550,18 @@ $('query').oninput=()=>{
  suggestTimer=setTimeout(async()=>{
   const list=await api(`/api/suggest?q=${encodeURIComponent(q)}`).catch(()=>[]);
   if(run!==suggestRun||document.activeElement!==$('query'))return;
-  $('suggestions').replaceChildren(...list.map(text=>{const li=el('li'),typed=text.toLowerCase().startsWith(q.toLowerCase())?text.slice(0,q.length):'';li.append(typed,el('b',text.slice(typed.length)));li.setAttribute('role','option');li.onpointerdown=e=>{e.preventDefault();pickSuggestion(text);};return li;}));
+  // karaoke-server: Spotify songs come as {text, title, artist, art} (album cover, song, artist); YouTube's as plain text
+  $('suggestions').replaceChildren(...list.map(item=>{const li=el('li');li.setAttribute('role','option');
+   if(typeof item==='string'){const text=item,typed=text.toLowerCase().startsWith(q.toLowerCase())?text.slice(0,q.length):'';li.append(typed,el('b',text.slice(typed.length)));li.dataset.q=text;}
+   else{li.className='song-suggestion';const art=el('img');art.alt='';art.loading='lazy';if(item.art)art.src=item.art;else art.hidden=true;const words=el('span',undefined,'ss-text');words.append(el('b',item.title),el('small',item.artist));li.append(art,words);li.dataset.q=item.text;}
+   li.onpointerdown=e=>{e.preventDefault();pickSuggestion(li.dataset.q);};return li;}));
   suggestIndex=-1;$('suggestions').hidden=!list.length;$('query').setAttribute('aria-expanded',String(!!list.length));
  },150);
 };
 $('query').onkeydown=e=>{
  if($('suggestions').hidden)return;
  if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();markSuggestion(suggestIndex+(e.key==='ArrowDown'?1:-1));}
- else if(e.key==='Enter'&&suggestIndex>=0){e.preventDefault();pickSuggestion($('suggestions').children[suggestIndex].textContent);}
+ else if(e.key==='Enter'&&suggestIndex>=0){e.preventDefault();pickSuggestion($('suggestions').children[suggestIndex].dataset.q);}
  else if(e.key==='Escape')hideSuggestions();
 };
 $('query').onblur=()=>setTimeout(hideSuggestions,100);

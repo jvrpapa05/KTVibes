@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from .queue import State, VERSION
 from . import metrics  # karaoke-server: local usage/health metrics (cache/metrics.jsonl)
-from . import lyrics, scenery, songbook, stems, worker, youtube
+from . import lyrics, scenery, songbook, spotify, stems, worker, youtube
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = Path(os.environ.get("KTVIBES_CACHE", ROOT / "cache"))
@@ -95,6 +95,15 @@ async def get_state():
 
 @app.get("/api/suggest")
 async def suggest(q: str = Query(min_length=1, max_length=200)):
+    # karaoke-server (user, 2026-11-26): songs from Spotify's catalogue (clean names, album art, typos and nicknames
+    # understood: "5sos", "eheads"); YouTube's search-box completions when Spotify isn't set up or doesn't answer
+    if spotify.enabled():
+        try:
+            songs = await asyncio.wait_for(asyncio.to_thread(spotify.search_tracks, q), 3)
+            if songs:
+                return [{"text": f"{s['artist'].split(', ')[0]} {s['title']}", **s} for s in songs]
+        except Exception:
+            logging.getLogger("uvicorn.error").warning("Spotify suggestions failed for %r", q, exc_info=True)
     try:
         return await asyncio.to_thread(youtube.suggest, q)
     except Exception:

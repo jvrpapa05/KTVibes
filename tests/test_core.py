@@ -747,6 +747,31 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         self.assertGreater(gaps[0][0], 185)            # ...but singing after the last line (193-299 s) is
         self.assertGreater(gaps[0][1], 290)
 
+    def test_spotify_suggestions(self):
+        # karaoke-server (user, 2026-11-26): Spotify's catalogue for search suggestions; nothing without keys
+        import io, json, os
+        from ktvibes import spotify
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(spotify.enabled())
+        track = lambda name, artist, album_art: {"id": name, "name": name, "duration_ms": 206000, "artists": [{"name": artist}],
+                                                 "album": {"images": [{"url": album_art + "640", "width": 640}, {"url": album_art + "64", "width": 64}]}}
+        answers = [{"access_token": "t", "expires_in": 3600},
+                   {"tracks": {"items": [track("Good Girls", "5 Seconds of Summer", "a"), track("Good Girls - Live", "5 Seconds of Summer", "b"),
+                                         track("Amnesia", "5 Seconds of Summer", "c")]}}]
+        calls = []
+        def fake(request, timeout=0):
+            calls.append(getattr(request, "full_url", request)); return io.BytesIO(json.dumps(answers.pop(0)).encode())
+        spotify._cache.clear(); spotify._token.update(value="", until=0)
+        with unittest.mock.patch.dict(os.environ, {"SPOTIFY_CLIENT_ID": "id", "SPOTIFY_CLIENT_SECRET": "secret"}), \
+             unittest.mock.patch.object(spotify.urllib.request, "urlopen", fake):
+            songs = spotify.search_tracks("5sos good girls")
+            again = spotify.search_tracks("5SOS good girls ")          # same words: from memory, no call
+        self.assertEqual([s["title"] for s in songs], ["Good Girls", "Amnesia"])   # the live copy of the same song folds in
+        self.assertEqual((songs[0]["artist"], songs[0]["duration"], songs[0]["art"]), ("5 Seconds of Summer", 206.0, "a64"))
+        self.assertEqual(again, songs)
+        self.assertEqual(len(calls), 2)                                  # one token, one search
+        self.assertIn("limit=10", calls[1])                             # never more than the app may ask for
+
     def test_accents_do_not_stop_a_match(self):
         # karaoke-server: 5,000-song study (2026-11-22): "GIVĒON - Heartbreak Anniversary (Official Music Video)" vs
         # LRCLIB's "Giveon", and "MÍA" vs "MIA": the official video was passed over
