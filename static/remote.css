@@ -327,6 +327,8 @@ body.sheet-open .toast.on{transform:translate(-50%,0)}
 .kind-cover{background:#9ec5ff26;color:#b7d3ff}
 .lyric-option em.fits{background:#7cf2c626;color:#8ff5cf}
 .playable-note{margin:2px 4px 8px;color:#8ff5cf;font-size:12.5px;font-weight:600}
+.vocal-note{margin:2px 4px 8px;opacity:.7;font-size:12.5px}
+.vocal-note[hidden]{display:none}
 
 /* karaoke-server: "Were the lyrics in sync?" after each song; everyone in the room can vote */
 .vote{position:fixed;left:50%;top:calc(10px + env(safe-area-inset-top));z-index:45;animation:vote-in .45s var(--spring,ease-out);width:min(calc(100% - 24px),420px);transform:translateX(-50%);display:flex;flex-direction:column;gap:10px;padding:16px 16px 14px;border-radius:20px;background:#1d221ef7;border:1px solid var(--line);box-shadow:0 10px 36px #000a;text-align:center}

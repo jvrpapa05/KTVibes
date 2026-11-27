@@ -328,11 +328,13 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValidationError):
             Song(id='abcdefghijk', artist='Queen', title='Song', singer='x' * 41)
 
-    async def test_each_singer_gets_their_own_mix_key_and_speed(self):
-        # karaoke-server: Anna likes 20% vocals, Bea 50%; each song plays with its singer's settings.
+    async def test_each_singer_gets_their_own_key_and_every_song_starts_at_10_percent_vocals(self):
+        # karaoke-server: each song plays with its singer's settings; the guide vocals are not one of them (user,
+        # 2026-11-28): every song starts at 10%, so everyone hears that the voice can be taken out.
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'queue.json'
             state = State(); state.restore(path, seed=lambda: {})
+            state.claim_singer('Anna', 'phone-a'); state.claim_singer('Bea', 'phone-b')
             async def sing(video_id, singer):
                 item = await state.add(video_id, 'Artist', 'Song ' + video_id[:2], singer)
                 item['status'] = 'ready'
@@ -342,25 +344,30 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
                     state.promote()
                 self.assertEqual(state.current['singer'], singer)
             await sing('aaaaaaaaaaa', 'Anna')
-            await state.control({'action': 'vocal', 'value': 0.2})
+            await state.control({'action': 'vocal', 'value': 1})
+            self.assertEqual(state.vocal, 1)                       # changed live, for this song
             await state.control({'action': 'key', 'value': -2})
             await sing('bbbbbbbbbbb', 'Bea')
-            self.assertEqual((state.key, state.speed), (0, 1.0))  # a first-timer starts as recorded
+            self.assertEqual((state.vocal, state.key, state.speed), (0.1, 0, 1.0))  # a first-timer starts from the defaults
             await state.control({'action': 'vocal', 'value': 0.5})
             await state.control({'action': 'speed', 'value': 0.9})
+            await state.control({'action': 'key', 'value': 1})
             await sing('ccccccccccc', 'anna')  # same singer, any case
-            self.assertEqual((state.vocal, state.key, state.speed), (0.2, -2, 1.0))
+            self.assertEqual((state.vocal, state.key, state.speed), (0.1, -2, 1.0))
             await sing('ddddddddddd', 'Bea')
-            self.assertEqual((state.vocal, state.key, state.speed), (0.5, 0, 1.0))  # karaoke-server: speed removed, always 100%
-            await sing('eeeeeeeeeee', '')  # no name: room settings, nothing saved
-            await state.control({'action': 'vocal', 'value': 0.9})
-            self.assertEqual(state.profiles['bea']['vocal'], 0.5)
+            self.assertEqual((state.vocal, state.key, state.speed), (0.1, 1, 1.0))  # karaoke-server: speed removed, always 100%
+            await sing('eeeeeeeeeee', '')  # no name: the defaults, nothing saved
+            await state.control({'action': 'key', 'value': 4})
+            self.assertEqual((state.key, state.profiles['bea']['key']), (4, 1))
+            self.assertNotIn('vocal', state.profiles['anna'])
             await state.broadcast()
             again = State(); again.restore(path, seed=lambda: {})
-            self.assertEqual({k: again.profiles['anna'][k] for k in ('vocal', 'key', 'speed')}, {'vocal': 0.2, 'key': -2, 'speed': 1.0})
+            self.assertEqual({k: again.profiles['anna'][k] for k in ('key', 'speed')}, {'key': -2, 'speed': 1.0})
+            self.assertEqual(state.snapshot()['defaults']['vocal'], 0.1)
 
     async def test_singer_profile_covers_display_settings_too(self):
         state = State()
+        state.claim_singer('Anna', 'phone-a'); state.claim_singer('Bea', 'phone-b')
         for video_id, singer in (('aaaaaaaaaaa', 'Anna'), ('bbbbbbbbbbb', 'Bea')):
             (await state.add(video_id, 'A', 'S', singer))['status'] = 'ready'
         state.promote()
@@ -368,7 +375,8 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         await state.control({'action': 'video_mode', 'value': 'blur'})
         await state.control({'action': 'lyric_mode', 'value': 'scroll'})
         await state.control({'action': 'music', 'value': 0.6})
-        state.advance()                                   # Bea: first time, keeps the room as it is
+        state.advance()                                   # Bea: first time, gets the defaults, not Anna's room
+        self.assertEqual((state.lyric_scale, state.lyric_mode, state.music), (1.5, 'two', 1.0))
         await state.control({'action': 'video_mode', 'value': 'show'})
         await state.control({'action': 'lyric_scale', 'value': 1.0})
         (await state.add('ccccccccccc', 'A', 'S', 'Anna'))['status'] = 'ready'
@@ -377,24 +385,54 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.profiles['bea']['video_mode'], 'show')
 
     async def test_a_phone_edits_its_own_profile_not_the_singer_on_stage(self):
-        # karaoke-server: PC moves vocals to 51% during Vince's song: PC's profile changes, Vince's song and profile don't.
+        # karaoke-server: PC changes the key and the vocals during Vince's song: PC's key is saved for PC's songs,
+        # Vince's song and profile don't change. The vocals are never saved: PC's song starts at 10% like every song.
         state = State()
         state.claim_singer('Vince', 'phone-v'); state.claim_singer('PC', 'phone-pc')
         (await state.add('aaaaaaaaaaa', 'A', 'S', 'Vince'))['status'] = 'ready'
         (await state.add('bbbbbbbbbbb', 'A', 'S', 'PC'))['status'] = 'ready'
         state.promote()
         await state.control({'action': 'vocal', 'value': 0.2, 'singer': 'Vince', 'device': 'phone-v'})  # Vince, live
-        await state.control({'action': 'vocal', 'value': 0.51, 'singer': 'PC', 'device': 'phone-pc'})   # PC, saved for later
-        await state.control({'action': 'key', 'value': 3, 'singer': 'pc', 'device': 'phone-pc'})
-        self.assertEqual(state.vocal, 0.2)                           # Vince's song keeps sounding as Vince set it
-        self.assertEqual(state.profiles['vince']['vocal'], 0.2)
-        self.assertEqual((state.profiles['pc']['vocal'], state.profiles['pc']['key']), (0.51, 3))
+        await state.control({'action': 'key', 'value': 1, 'singer': 'Vince', 'device': 'phone-v'})
+        await state.control({'action': 'vocal', 'value': 0.51, 'singer': 'PC', 'device': 'phone-pc'})   # PC: ignored
+        await state.control({'action': 'key', 'value': 3, 'singer': 'pc', 'device': 'phone-pc'})        # PC: saved for later
+        self.assertEqual((state.vocal, state.key), (0.2, 1))         # Vince's song keeps sounding as Vince set it
+        self.assertEqual(state.profiles['vince']['key'], 1)
+        self.assertEqual(state.profiles['pc']['key'], 3)
+        self.assertNotIn('vocal', state.profiles['pc'])
         self.assertIn('profiles', state.snapshot())
         state.advance()                                               # PC's turn: PC's settings load
-        self.assertEqual((state.vocal, state.key), (0.51, 3))
+        self.assertEqual((state.vocal, state.key), (0.1, 3))
         with self.assertRaisesRegex(ValueError, 'reload'):            # a phone that doesn't hold the name can't edit it
-            await state.control({'action': 'vocal', 'value': 0.9, 'singer': 'Vince', 'device': 'phone-pc'})
-        self.assertEqual(state.profiles['vince']['vocal'], 0.2)
+            await state.control({'action': 'key', 'value': 5, 'singer': 'Vince', 'device': 'phone-pc'})
+        self.assertEqual(state.profiles['vince']['key'], 1)
+
+    async def test_accounts_are_deleted_three_hours_after_they_were_made(self):
+        # karaoke-server (user, 2026-11-28): the name and its settings go; the same name then starts from the defaults.
+        from ktvibes import queue
+        state = State()
+        self.assertEqual(state.claim_singer('Ana', 'phone-a'), 'Ana')
+        self.assertEqual(state.account_left('ana'), queue.ACCOUNT_LIFE)
+        (await state.add('aaaaaaaaaaa', 'A', 'S', 'Ana'))['status'] = 'ready'
+        state.promote()
+        await state.control({'action': 'key', 'value': 2, 'singer': 'Ana', 'device': 'phone-a'})
+        self.assertEqual(state.profiles['ana']['key'], 2)
+        state.singers['ana']['since'] -= queue.ACCOUNT_LIFE - 60      # 2 h 59 min old: using the name does not renew it
+        self.assertEqual(state.claim_singer('Ana', 'phone-a', keep=True), 'Ana')
+        self.assertEqual(state.claim_singer('Ana B', 'phone-a'), 'Ana B')  # nor does a new name
+        self.assertLessEqual(state.account_left('Ana B'), 60)
+        self.assertEqual(state.profiles['ana b']['key'], 2)
+        state.singers['ana b']['since'] -= 61
+        with self.assertRaisesRegex(ValueError, '3 hours'):           # the phone's stored name is not taken again silently
+            state.claim_singer('Ana B', 'phone-a', keep=True)
+        self.assertEqual((state.singers, state.profiles), ({}, {}))
+        with self.assertRaisesRegex(ValueError, 'reload'):
+            await state.control({'action': 'key', 'value': 1, 'singer': 'Ana B', 'device': 'phone-a'})
+        self.assertEqual(state.claim_singer('Ana B', 'phone-b'), 'Ana B')  # typed again (by anyone): a new account
+        self.assertEqual(state.account_left('Ana B'), queue.ACCOUNT_LIFE)
+        (await state.add('bbbbbbbbbbb', 'A', 'S', 'Ana B'))['status'] = 'ready'
+        state.advance()
+        self.assertEqual((state.key, state.vocal, state.lyric_scale), (0, 0.1, 1.5))
 
     def test_version_is_semver_and_broadcast(self):
         # karaoke-server: ktvibes/VERSION is our SemVer, sent with the state so the TV and remotes can show it.
@@ -876,7 +914,7 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
         names_from_records(opm, [{"artistName": "Rey Valera", "trackName": "Kung Kailangan Mo Ako"}])
         self.assertEqual((opm[0]["parsed"]["artist"], opm[0]["parsed"]["title"]), ("Rey Valera", "Kung Kailangan Mo Ako"))
 
-    def test_singer_names_are_unique_per_phone_until_idle(self):
+    def test_singer_names_are_unique_per_phone_until_the_account_is_deleted(self):
         state = State()
         self.assertEqual(state.claim_singer('  Anna ', 'phone-1'), 'Anna')
         self.assertEqual(state.claim_singer('anna', 'phone-1'), 'anna')  # same phone may keep or restyle it
@@ -884,7 +922,7 @@ b'\xff\xd8\xff' + b'0' * 100, 'image/jpeg', 'Vince', 'phone-v')
             state.claim_singer('ANNA', 'phone-2')
         state.claim_singer('Bea', 'phone-1')  # switching names frees the old one
         self.assertEqual(state.claim_singer('Anna', 'phone-2'), 'Anna')
-        state.singers['anna']['seen'] -= 6 * 3600 + 1  # idle for 6 hours: free again
+        state.singers['anna']['since'] -= 3 * 3600 + 1  # the account is 3 hours old: deleted, the name is free again
         self.assertEqual(state.claim_singer('Anna', 'phone-3'), 'Anna')
         with self.assertRaises(ValueError):
             state.claim_singer('   ', 'phone-3')

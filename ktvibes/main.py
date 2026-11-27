@@ -497,7 +497,7 @@ async def enqueue(song: Song):
     if state.family == "on" and song.id in library and library[song.id]["explicit"]:
         raise HTTPException(409, "Family-friendly mode is on: this song is marked explicit")
     try:
-        singer = state.claim_singer(song.singer, song.device) if song.singer else ""
+        singer = state.claim_singer(song.singer, song.device, keep=True) if song.singer else ""
         item = await state.add(song.id, song.artist, song.title, singer, song.device if singer else "", song.kind,
                                onscreen=song.onscreen or bool(verdict))
         metrics.record("queue_add", song=song.id, title=song.title, artist=song.artist, singer=singer, rank=song.rank,
@@ -510,16 +510,17 @@ async def enqueue(song: Song):
 class Singer(BaseModel):
     name: str = Field(min_length=1, max_length=40)
     device: str = Field(min_length=8, max_length=64)
+    keep: bool = False  # karaoke-server: only keep a name this phone already holds (its account lasts queue.ACCOUNT_LIFE)
 
 @app.post("/api/singer")
 async def claim_singer(singer: Singer):
     """karaoke-server: take (or keep) a singer name for this phone; 409 if another phone is using it."""
     try:
-        name = state.claim_singer(singer.name, singer.device)
+        name = state.claim_singer(singer.name, singer.device, singer.keep)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     await state.broadcast()  # karaoke-server: a renamed singer's songs show the new name on the TV and phones at once
-    return {"name": name}
+    return {"name": name, "left": state.account_left(name)}
 
 @app.get("/scenery/{name}")
 async def scenery_film(name: str):

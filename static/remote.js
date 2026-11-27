@@ -16,13 +16,13 @@ function toast(text,action,kind){
 }
 const sendRaw=connect('remote',render,message=>toast(message,undefined,'err'),undefined,event=>onFun(event));
 // karaoke-server: settings carry who's changing them; the server saves them to that singer's profile (live only on their own song).
-const PROFILE_ACTIONS=new Set(['vocal','music','key','speed','lyric_scale','video_mode','lyric_mode']);
+const PROFILE_ACTIONS=new Set(['vocal','music','key','speed','lyric_scale','video_mode','lyric_mode']);  // vocal: sent with the name, but never saved (every song starts at 10%)
 // karaoke-server: pause, play and skip carry who did it too, so the TV can say so ("Paused by Ana")
 const NAMED_ACTIONS=new Set(['play','pause','skip']);
 const send=message=>sendRaw((PROFILE_ACTIONS.has(message.action)||NAMED_ACTIONS.has(message.action))&&singer()?{...message,singer:singer(),device:deviceId()}:message);
 // What the settings sheet shows: the room while it's your song (or a song without a name), otherwise your own profile.
 function editingOwn(){const me=singer().toLowerCase(),on=(state?.current?.singer||'').toLowerCase();return !!me&&(!state?.current||(!!on&&on!==me));}
-function view(){if(!editingOwn())return state;const mine=state.profiles?.[singer().toLowerCase()];return {...state,...(mine||{})};}
+function view(){if(!editingOwn())return state;const mine=state.profiles?.[singer().toLowerCase()];return {...state,...(state.defaults||{}),...(mine||{}),...(state.defaults?{vocal:state.defaults.vocal}:{})};}  // no saved settings: the defaults; guide vocals always start at the default
 let skew=0;  // server clock minus ours, for the progress estimate
 let lyricsWatch=null;
 function render(next){
@@ -147,7 +147,9 @@ function showControls(before){
  for(const [id,value] of [['vocal',v.vocal],['music',v.music]]){
   if(document.activeElement!==$(id)&&!gliding)$(id).value=value;$(`${id}-value`).textContent=`${Math.round(value*100)}%`;
  }
- for(const b of document.querySelectorAll('.presets button'))b.setAttribute('aria-pressed',Math.abs(b.dataset.vocal-v.vocal)<.005&&Math.abs(b.dataset.music-v.music)<.005);
+ for(const b of document.querySelectorAll('.presets button')){b.setAttribute('aria-pressed',Math.abs(b.dataset.vocal-v.vocal)<.005&&Math.abs(b.dataset.music-v.music)<.005);b.disabled=editingOwn();}
+ // karaoke-server (user, 2026-11-28): guide vocals start at 10% on every song and are only changed during your own song
+ $('vocal').disabled=editingOwn();for(const b of document.querySelectorAll('[data-mix-step="vocal"]'))b.disabled=editingOwn();$('vocal-note').hidden=!editingOwn();
  if(editingOwn())$('key-down').disabled=$('key-up').disabled=false;  // your key can be set before your song
  $('key-down').disabled||=v.key<=-6;$('key-up').disabled||=v.key>=6;
  if(v.key!==shownKey){rollKey(v.key,shownKey===null?0:v.key-shownKey);shownKey=v.key;}
@@ -371,7 +373,7 @@ function showResult(song,list=$('results'),wrap=row=>row,index=-1){
   b.disabled=true;
   try{const rank=list===$('results')?[...list.querySelectorAll('.result')].indexOf(b):null;const added=await enqueue({id:song.id,...song.parsed,rank:rank>=0?rank:null,kind:song.kind,onscreen:song.onscreen});icon(status,'added');mark('added',el('em','예약됨'),' · added');haptic([10,40,10]);flyToQueue(image);toast(`Added ${song.parsed.title}`);
    if(list===$('results'))setTimeout(()=>leaveSearch(added?.key),450);}
-  catch(error){icon(status,'failed');mark('failed',"Couldn't add. Try again");toast(error.message,undefined,'err');}finally{b.disabled=false;}
+  catch(error){icon(status,'failed');mark('failed',"Couldn't add. Try again");if(/3 hours/.test(error.message))nameExpired(error.message);else toast(error.message,undefined,'err');}finally{b.disabled=false;}
  };
  list.append(wrap(b));
 }
@@ -594,7 +596,14 @@ function showSinger(){$('singer-name').textContent=singer()||'there';}
 const DEVICE='karaoke.device';let deviceMemo='';
 function deviceId(){try{let id=localStorage.getItem(DEVICE);if(!id){id=crypto.randomUUID?.()||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;localStorage.setItem(DEVICE,id);}return id;}catch{return deviceMemo||=`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;}}
 function setSinger(name){singerName=name;try{if(name)localStorage.setItem(SINGER,name);else localStorage.removeItem(SINGER);}catch{}showSinger();if(state)showControls();}  // whose settings the sheet shows depends on the name
-async function claim(name){return api('/api/singer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,device:deviceId()})});}
+// karaoke-server (user, 2026-11-28): a name and its settings are deleted 3 hours after the name was taken; the server says
+// how long is left, and the remote asks for a name again when the time is up.
+const UNTIL='karaoke.singer.until';let untilMemo=0;
+function nameUntil(){try{return Number(localStorage.getItem(UNTIL))||untilMemo;}catch{return untilMemo;}}
+async function claim(name,keep=false){const r=await api('/api/singer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,device:deviceId(),keep})});
+ untilMemo=Date.now()+(r.left||0)*1000;try{localStorage.setItem(UNTIL,String(untilMemo));}catch{}return r;}
+function nameExpired(message='Names are kept for 3 hours. Enter your name to keep singing.'){setSinger('');askName(message);}
+setInterval(()=>{if(singer()&&nameUntil()&&Date.now()>=nameUntil())nameExpired();},20*1000);
 function askName(message=''){$('name-input').value=singer();$('name-cancel').hidden=!singer();$('name-save').textContent=singer()?'Save':'Start';$('name-error').textContent=message;$('name-error').hidden=!message;$('name-gate').hidden=false;setTimeout(()=>$('name-input').focus(),50);}
 $('name-form').onsubmit=async e=>{e.preventDefault();const name=$('name-input').value.split(/\s+/).filter(Boolean).join(' ').slice(0,40);if(!name)return;
  $('name-save').disabled=true;
@@ -605,7 +614,7 @@ $('name-form').onsubmit=async e=>{e.preventDefault();const name=$('name-input').
 $('hello').onclick=()=>askName();
 $('name-cancel').onclick=()=>{$('name-gate').hidden=true;};
 // Keep the name while the remote is open; if someone else took it meanwhile, ask again.
-async function keepName(){const name=singer();if(!name)return askName();try{const r=await claim(name);setSinger(r.name);}catch(error){if(/already/.test(error.message)){setSinger('');askName(error.message);}}}
+async function keepName(){const name=singer();if(!name)return askName();try{const r=await claim(name,true);setSinger(r.name);}catch(error){if(/already|3 hours/.test(error.message))nameExpired(error.message);}}
 setInterval(()=>{if(!document.hidden)keepName();},15*60*1000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)keepName();});
 showSinger();keepName();
