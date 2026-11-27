@@ -27,9 +27,11 @@ def learn_step(step, seconds, duration):
         STEP_RATE[step] = round(0.6 * STEP_RATE[step] + 0.4 * seconds / float(duration), 4)
 
 def separate(source, destination):
+    """Returns (seconds, gain, model name)."""
     # Keep model imports off the server startup path.
-    from .separate import separate as separate_audio
-    return separate_audio(source, destination)
+    from . import separate as separation
+    seconds, gain = separation.separate(source, destination)
+    return seconds, gain, separation.MODEL
 
 def reporter(state, item, step):
     """Progress callback for worker threads: while `step` is the one on show, record the fraction; broadcast at most twice a second."""
@@ -308,7 +310,8 @@ async def run(state, cache: Path):
                     item["status"], item["step"], item["progress"] = "separating", None, None
                     expect_step(item, "separating", meta.get("duration"))
                     await state.broadcast()
-                    meta["separation_seconds"], gain = await asyncio.to_thread(separate, folder / "audio.m4a", folder)
+                    # karaoke-server: separation_model tells Mel-Band RoFormer songs from HTDemucs ones (no field: HTDemucs)
+                    meta["separation_seconds"], gain, meta["separation_model"] = await asyncio.to_thread(separate, folder / "audio.m4a", folder)
                     separated = True
                     learn_step("separating", meta["separation_seconds"], meta.get("duration"))
                 meta["stem_gain"] = gain
@@ -408,7 +411,8 @@ async def run(state, cache: Path):
             metrics.record("song_prepared", song=item["id"], title=item["title"], artist=item["artist"], singer=item.get("singer", ""),
                            duration=round(item.get("duration") or 0), waited_s=round(time.time() - item.get("added", time.time()), 1),
                            syncing_s=round(time.monotonic() - syncing_from, 1), separated=separated,
-                           separation_s=round(meta.get("separation_seconds") or 0, 1) if separated else 0, **timing,
+                           separation_s=round(meta.get("separation_seconds") or 0, 1) if separated else 0,
+                           separation_model=meta.get("separation_model", "htdemucs") if separated else "", **timing,
                            lyrics_lines=len(item.get("lyrics") or []), aligned=timed.get("aligned"),
                            video=item.get("video", False), video_fps=round(youtube.video_fps(video_file)) if video_file.is_file() else 0,
                            video_30=item.get("video_30", False), video_warning=item.get("video_warning", ""))

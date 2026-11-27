@@ -1579,3 +1579,42 @@ class MusicEndTest(unittest.TestCase):
             self.stem(folder, 5, 4)
             (Path(folder) / "vocals.opus").write_bytes(b"not audio")
             self.assertIsNone(stems.song_end(Path(folder)))
+
+class SeparationTests(unittest.TestCase):
+    # karaoke-server: Mel-Band RoFormer separates; HTDemucs only when it can't be loaded.
+    def setUp(self):
+        from ktvibes import separate
+        self.separate = separate
+        patcher = unittest.mock.patch.multiple(separate, _roformer=None, _roformer_failed=False, _htdemucs=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_chunks_cover_the_song_and_the_last_ends_at_its_end(self):
+        starts = self.separate._chunk_starts
+        self.assertEqual(starts(25, 10, 10), [0, 10, 15])
+        self.assertEqual(starts(20, 10, 10), [0, 10])
+        self.assertEqual(starts(7, 10, 10), [0])
+        self.assertEqual(starts(25, 10, 5), [0, 5, 10, 15])
+
+    def test_roformer_is_used_when_it_loads(self):
+        model = object()
+        with unittest.mock.patch.object(self.separate, "_load_roformer", return_value=model):
+            self.assertEqual(self.separate._model(), (self.separate.ROFORMER, model))
+
+    def test_htdemucs_is_the_fallback_and_roformer_is_not_retried_every_song(self):
+        fallback = object()
+        with unittest.mock.patch.object(self.separate, "_load_roformer", side_effect=RuntimeError("no checkpoint")) as load, \
+             unittest.mock.patch("demucs.pretrained.get_model") as get_model, self.assertLogs("ktvibes.separate", "ERROR"):
+            get_model.return_value.to.return_value.eval.return_value = fallback
+            self.assertEqual(self.separate._model(), ("htdemucs", fallback))
+            self.assertEqual(self.separate._model(), ("htdemucs", fallback))
+        self.assertEqual(load.call_count, 1)
+
+    def test_a_download_with_the_wrong_checksum_is_thrown_away(self):
+        import io
+        with tempfile.TemporaryDirectory() as folder, \
+             unittest.mock.patch("urllib.request.urlopen", return_value=io.BytesIO(b"not the model")):
+            target = Path(folder) / "model.ckpt"
+            with self.assertRaises(RuntimeError):
+                self.separate.download(target)
+            self.assertEqual(list(Path(folder).iterdir()), [])
