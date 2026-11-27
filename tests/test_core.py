@@ -1616,5 +1616,5 @@ class SeparationTests(unittest.TestCase):
              unittest.mock.patch("urllib.request.urlopen", return_value=io.BytesIO(b"not the model")):
             target = Path(folder) / "model.ckpt"
             with self.assertRaises(RuntimeError):
-                self.separate.download(target)
+                self.separate.download(path=target)
             self.assertEqual(list(Path(folder).iterdir()), [])
