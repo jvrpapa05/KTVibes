@@ -1646,3 +1646,30 @@ class OnScreenLyricsTests(unittest.TestCase):
         frames = [[(f"sung line {i}", 0.9)] if i < 25 else [] for i in range(60)]
         self.assertFalse(onscreen.verdict(frames)["ok"])  # 25 of 60 frames: under half
         self.assertTrue(onscreen.verdict(frames, [i < 25 for i in range(60)])["ok"])
+
+class SongShiftTests(unittest.TestCase):
+    # karaoke-server: a whole-song lyric shift is used only when clearly more lines then align (align.song_shift)
+    def lines(self):
+        return [{"t": 10.0 + 4 * i, "text": f"line {i}"} for i in range(10)]
+
+    def shift(self, candidates, shares):
+        from ktvibes import align
+        def fake_align(lines, samples, rate):
+            share = shares[round(lines[0]["t"] - 10.0, 2)]
+            return set(range(round(share * len(lines))))
+        with unittest.mock.patch.object(align, "_shift_candidates", return_value=candidates), \
+             unittest.mock.patch.object(align, "align", fake_align):
+            return align.song_shift(self.lines(), None, 48000)
+
+    def test_a_shift_that_lets_more_lines_align_is_used(self):
+        self.assertEqual(self.shift([25.0], {0.0: 0.4, 25.0: 0.7}), 25.0)
+
+    def test_a_shift_onto_a_repeated_chorus_is_refused(self):
+        # the letters fit better there, but no more lines align than before ("Gusto Kita": -36.5 s was wrong)
+        self.assertEqual(self.shift([-5.0], {0.0: 0.8, -5.0: 0.8}), 0.0)
+
+    def test_the_candidate_with_more_aligned_lines_wins(self):
+        self.assertEqual(self.shift([-5.0, 3.0], {0.0: 0.5, -5.0: 0.6, 3.0: 0.9}), 3.0)
+
+    def test_no_candidate_means_no_shift_and_no_extra_alignment(self):
+        self.assertEqual(self.shift([], {}), 0.0)

@@ -130,3 +130,95 @@ def align(lines: list[dict], samples, rate: int, pad: float = 0.4) -> set[int]:
             end = min(line_end(lines, index) + pad, after[0][1] + LEAD if after else float("inf"))
             place([index], start, end)
         return aligned
+
+# karaoke-server: a whole-song shift found by the aligner itself -------------------------------------------------
+# The room's votes (2026-11-27: 9 of 88 voted songs "not in sync") were mostly whole songs 10-25 s off: the YouTube
+# version has another intro than the recording LRCLIB timed, and the vocal-energy shift (lyrics.find_shift) missed it.
+# Word alignment only looks +-0.4 s around each line, so it can't recover that. Here the letters of the lyric lines
+# are scored against the vocals at every shift of -SHIFT_REACH..SHIFT_REACH seconds (CTC likelihood, one batched call
+# per line), once with SHIFT_SAMPLE lines spread over the song and once with every line (a few lines can latch onto
+# a repeated chorus). A shift is used only when the letters fit SHIFT_RATIO times better than as they are AND clearly
+# more lines can then be word-aligned (SHIFT_GAIN): that second test rejected every wrong shift in the study.
+# Measured against Whisper word times on the voted songs: 5 of 9 flagged songs fixed (median error 10-25 s -> under
+# 0.7 s), 1 of 31 confirmed songs improved, 30 unchanged; the rest of the flagged ones have other lyrics or versions.
+SHIFT_REACH = 120.0
+SHIFT_STEP = 0.5
+SHIFT_SAMPLE = 16
+SHIFT_RATIO = 2.5
+SHIFT_MIN = 1.5  # smaller offsets are left to the word alignment
+SHIFT_GAIN = 0.08  # more of the lines must align: at least this share of them
+
+def _shift_candidates(lines: list[dict], samples, rate: int) -> list[float]:
+    import numpy as np
+    import torch
+    import torch.nn.functional as Fn
+    import torchaudio.functional as F
+    with _lock:
+        bundle, model = _load()
+        device = next(model.parameters()).device
+        mono = torch.as_tensor(samples, dtype=torch.float32)
+        mono = mono.mean(dim=1) if mono.ndim == 2 else mono
+        audio = F.resample(mono, rate, bundle.sample_rate)
+        chunk, parts = 30 * bundle.sample_rate, []
+        with torch.inference_mode():
+            for start in range(0, len(audio), chunk):
+                clip = audio[start:start + chunk]
+                if len(clip) >= bundle.sample_rate // 10:
+                    parts.append(model(clip[None].to(device))[0][0])
+            if not parts:
+                return []
+            logp = torch.log_softmax(torch.cat(parts).float(), dim=-1)
+        fps = logp.shape[0] / (len(audio) / bundle.sample_rate)
+        tokenizer = bundle.get_tokenizer()
+        usable = []
+        for index, line in enumerate(lines):
+            if line["text"] and not line.get("exact") and not echo(line):
+                letters = [w for w in spoken_letters(split_units(line["text"])) if w]
+                if len(letters) >= 3:
+                    usable.append((index, torch.tensor([t for word in tokenizer(letters) for t in word], device=device)))
+        if len(usable) < 6:
+            return []
+        shifts = np.round(np.arange(-SHIFT_REACH, SHIFT_REACH + SHIFT_STEP / 2, SHIFT_STEP), 2)
+        table = np.full((len(usable), len(shifts)), np.nan)
+        with torch.inference_mode():
+            for row, (index, target) in enumerate(usable):
+                width = int((line_end(lines, index) - lines[index]["t"] + 1.0) * fps)
+                starts = int((lines[index]["t"] - 0.5) * fps) + np.round(shifts * fps).astype(int)
+                inside = (starts >= 0) & (starts + width <= logp.shape[0])
+                if width < 2 * len(target) or not inside.any():
+                    continue
+                at = torch.as_tensor(starts[inside], device=device)[:, None] + torch.arange(width, device=device)
+                batch = logp[at].transpose(0, 1)
+                n = batch.shape[1]
+                loss = Fn.ctc_loss(batch, target.repeat(n, 1), torch.full((n,), width, dtype=torch.long),
+                                   torch.full((n,), len(target), dtype=torch.long), blank=0, reduction="none", zero_infinity=True)
+                table[row, inside] = torch.exp(-loss / len(target)).cpu().numpy()
+    zero = int(np.argmin(np.abs(shifts)))
+    found = []
+    spread = sorted({round(k * (len(usable) - 1) / (SHIFT_SAMPLE - 1)) for k in range(min(SHIFT_SAMPLE, len(usable)))})
+    for rows in (spread, list(range(len(usable)))):
+        part = table[rows]
+        known = ~np.isnan(part)
+        # a shift that pushes lines out of the audio fits less (weighted by the share still inside), and not at all
+        # once many are out: otherwise a repeat of the chorus further along can win with fewer lines
+        inside = known.sum(axis=0) / len(rows)
+        scores = np.where(inside >= 0.6, np.where(known, part, 0).sum(axis=0) / len(rows) * inside, 0)
+        best = int(np.argmax(scores))
+        if scores[zero] > 0 and scores[best] >= SHIFT_RATIO * scores[zero] and abs(shifts[best]) >= SHIFT_MIN:
+            found.append(float(shifts[best]))
+    return list(dict.fromkeys(found))
+
+def song_shift(lines: list[dict], samples, rate: int) -> float:
+    """Seconds to add to every stamp so the words sit where they are sung; 0.0 unless clearly better (see above)."""
+    import copy
+    candidates = _shift_candidates(lines, samples, rate)
+    if not candidates:
+        return 0.0
+    def share(shift):
+        trial = copy.deepcopy(lines)
+        for line in trial:
+            line["t"] = max(0.0, line["t"] + shift)
+        return len(align(trial, samples, rate)) / max(1, sum(1 for line in trial if line["text"]))
+    as_is = share(0.0)
+    best = max(((share(shift), shift) for shift in candidates), key=lambda pair: pair[0])
+    return round(best[1], 2) if best[0] >= as_is + SHIFT_GAIN else 0.0

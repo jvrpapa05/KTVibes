@@ -9,7 +9,7 @@ import soundfile as sf
 from . import align, guides, onscreen, songbook, spotify, stems, youtube, lyrics, metrics
 
 log = logging.getLogger(__name__)
-TIMING_VERSION = 10  # bump when alignment or guide output changes, so cached timing is rebuilt
+TIMING_VERSION = 11  # bump when alignment or guide output changes, so cached timing is rebuilt (11: align.song_shift)
 LYRICS_RECHECK = 7 * 86400  # a song LRCLIB had no lyrics for is looked up again after this long
 STARTED = time.time()  # energy-only timing (aligner failed) cached before this run is retried once
 
@@ -90,6 +90,10 @@ def timed_lyrics(folder: Path, raw: str, samples_path: Path, lines: list[dict], 
         log.info("Lyric sections for %s moved %s to match the vocals", folder.name, moved)
     aligned = True
     try:
+        # karaoke-server: a whole-song shift the vocal energy missed, found by the aligner itself (align.song_shift)
+        if shift := align.song_shift(lines, samples, rate):
+            log.info("Lyrics for %s shifted %+.2fs: the words are sung there", folder.name, shift)
+            lyrics.shift_lines(lines, shift)
         # Forced alignment on the vocals; lines it cannot place keep the energy estimate.
         align.align(lines, samples, rate)
     except Exception:
