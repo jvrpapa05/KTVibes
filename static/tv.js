@@ -58,7 +58,7 @@ function remember(s){try{localStorage.setItem(SETTINGS,JSON.stringify(Object.fro
 function restore(s){const mine=saved();for(const action of SETTING_KEYS){const value=mine[action];if(value!==undefined&&value!==s[action])send({action,value});}}
 api('/api/config').then(c=>$('remote-url').textContent=$('sticker-url').textContent=c.remote_url).catch(e=>error(e.message));
 function render(next){
- state=next;noteCovers(state);if(state.version)$('app-version').textContent=`v${state.version}`;showPhones(state.phones);showAfter(state);if(restoring){restoring=false;restore(state);}else remember(state);if(state.guide!==guide){if(guide!==undefined)showGuideBadge(state.guide);guide=state.guide;document.body.dataset.guide=guide;}showChanges(state);showQueueChange(state);showPaused(state);document.body.style.setProperty('--lyric-scale',state.lyric_scale??1.5);document.body.dataset.video=state.video_mode||'show';document.body.dataset.lyrics=state.lyric_mode||'two';document.body.dataset.theme=state.theme||'default';for(const b of document.querySelectorAll('[data-theme-pick]'))b.setAttribute('aria-pressed',b.dataset.themePick===document.body.dataset.theme);showClassicBar(state);showSpecs(state);showBoot();roomClock();serverSkew=state.server_time-Date.now()/1000;$('tv-play').classList.toggle('paused',!state.playing);$('tv-play').setAttribute('aria-label',state.playing?'Pause':'Play');$('tv-guide').textContent=GUIDE_BADGES[state.guide]?.[0]??'Aa';$('tv-guide').hidden=(state.guides||[]).length<2;syncRanges();applyGain();
+ state=next;noteCovers(state);if(state.version)$('app-version').textContent=`v${state.version}`;showPhones(state.phones);showAfter(state);if(restoring){restoring=false;restore(state);}else remember(state);if(state.guide!==guide){if(guide!==undefined)showGuideBadge(state.guide);guide=state.guide;document.body.dataset.guide=guide;}showChanges(state);showQueueChange(state);showPaused(state);document.body.style.setProperty('--lyric-scale',state.lyric_scale??1.5);document.body.dataset.video=state.current?.onscreen_lyrics?'show':(state.video_mode||'show');document.body.dataset.onscreen=state.current?.onscreen_lyrics?'yes':'no';document.body.dataset.lyrics=state.lyric_mode||'two';document.body.dataset.theme=state.theme||'default';for(const b of document.querySelectorAll('[data-theme-pick]'))b.setAttribute('aria-pressed',b.dataset.themePick===document.body.dataset.theme);showClassicBar(state);showSpecs(state);showBoot();roomClock();serverSkew=state.server_time-Date.now()/1000;$('tv-play').classList.toggle('paused',!state.playing);$('tv-play').setAttribute('aria-label',state.playing?'Pause':'Play');$('tv-guide').textContent=GUIDE_BADGES[state.guide]?.[0]??'Aa';$('tv-guide').hidden=(state.guides||[]).length<2;syncRanges();applyGain();
  const queued=state.upcoming.filter(i=>i.status!=='error');
  // karaoke-server: rebuild only when what it shows changes (a rebuild restarts the scrolling of long titles),
  // and start scrolling the new rows straight away.
@@ -95,7 +95,7 @@ function render(next){
  document.body.classList.toggle('has-video',(showVideo()&&!video.error)||!!sceneryNow());
  // karaoke-server: a small label on the top-left card says what's on screen (user, 2026-11-22)
  // (the same tags search shows; "Lyric video" also when scenery plays in its place)
- {const c=state.current,label=!c?'':{official:'Official video',lyric:'Lyric video',audio:'Audio'}[c.kind]||'';
+ {const c=state.current,label=!c?'':c.onscreen_lyrics?'Lyrics in the video':{official:'Official video',lyric:'Lyric video',audio:'Audio'}[c.kind]||'';
   if($('song-kind').textContent!==label)$('song-kind').textContent=label;$('song-kind').hidden=!label;}
  // Switching layout, size or guide changes how wide each line is: place and fit the lines again.
  const nextFit=`${state.lyric_mode}|${state.lyric_scale}|${state.guide}`;
@@ -112,8 +112,9 @@ let lyricsRev=0,songLyrics=[],splitDone=false,slots=[],counting=null,still=false
 // karaoke-server (user, 2026-11-22): a lyric video's own words clash with ours, so the room can show calm scenery
 // instead (Settings › Lyric videos). The server hands each such song its own stretch of the scenery films (never the
 // same stretch twice, intros cut); it follows the song's position, pausing and resuming with it.
-const sceneryNow=()=>state?.current?.scenery&&state.lyric_video==='scenery'&&state.video_mode!=='hide'?state.current.scenery:null;
-const showVideo=()=>!!state?.current?.video&&state.video_mode!=='hide'&&!sceneryNow();
+const sceneryNow=()=>state?.current?.scenery&&!state.current.onscreen_lyrics&&state.lyric_video==='scenery'&&state.video_mode!=='hide'?state.current.scenery:null;
+// karaoke-server: a last-resort lyric video (onscreen.py) is the lyrics: always shown, whatever the room's video setting
+const showVideo=()=>!!state?.current?.video&&(state.video_mode!=='hide'||!!state.current.onscreen_lyrics)&&!sceneryNow();
 const scenery=document.getElementById('scenery');
 // karaoke-server (user, 2026-11-22: "always try 1080p and switch to 720 when necessary"): every song's scenery starts
 // in 1080p; if the TV drops more than 10% of its frames over ~4 s, that song switches to the 720p copy at the same
@@ -293,7 +294,7 @@ function reserved(){$('cb-dial').hidden=true;showAttractDial('');}
 function placeLyrics(list){
  lyrics=list;firstLine=lyrics.findIndex(line=>line.text);$('lyrics').replaceChildren();
  slots=[];let slot=0;lyrics.forEach((line,i)=>{if(breakAfter(i-1))slot=0;slots[i]=slot;slot^=1;});
- lyrics.forEach((line,i)=>{const p=el('p',line.units?undefined:line.text||'♪','lyric');p.dir='auto';p.dataset.slot=slots[i];for(const [text,,,latin,hangul,jyutping] of line.units||[]){const span=el('span',undefined,latin||hangul||jyutping?'unit ruby':'unit');if(latin||hangul||jyutping){const word=text.trimEnd(),ruby=el('ruby',word),rt=el('rt');rt.append(el('span',latin||'','latin'),el('span',jyutping||'','jyutping'),el('span',hangul||'','hangul'));ruby.append(rt);span.append(ruby);p.append(span,text.slice(word.length));}else{span.textContent=text;p.append(span);}}$('lyrics').append(p);});$('no-lyrics').hidden=!!lyrics.length;$('lyrics').hidden=!lyrics.length;
+ lyrics.forEach((line,i)=>{const p=el('p',line.units?undefined:line.text||'♪','lyric');p.dir='auto';p.dataset.slot=slots[i];for(const [text,,,latin,hangul,jyutping] of line.units||[]){const span=el('span',undefined,latin||hangul||jyutping?'unit ruby':'unit');if(latin||hangul||jyutping){const word=text.trimEnd(),ruby=el('ruby',word),rt=el('rt');rt.append(el('span',latin||'','latin'),el('span',jyutping||'','jyutping'),el('span',hangul||'','hangul'));ruby.append(rt);span.append(ruby);p.append(span,text.slice(word.length));}else{span.textContent=text;p.append(span);}}$('lyrics').append(p);});$('no-lyrics').hidden=!!lyrics.length||!!state?.current?.onscreen_lyrics;$('lyrics').hidden=!lyrics.length;
 }
 // Stems are stored scaled down to fit FLAC; the gain restores their original level.
 // Speed changes tempo only (the browser keeps pitch); the key shift is applied by the worklet.

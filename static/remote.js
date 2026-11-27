@@ -349,7 +349,7 @@ async function loadRecent(){
 }
 // Search in pages of 10; "More results" appends the next page.
 let search={query:'',page:0,seen:new Set()},searchRun=0;
-const enqueue=song=>api('/api/queue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:song.id,artist:song.artist,title:song.title,singer:singer(),device:deviceId(),...(song.rank!=null?{rank:song.rank,kind:song.kind||''}:{})})});  // rank/kind: metrics
+const enqueue=song=>api('/api/queue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:song.id,artist:song.artist,title:song.title,singer:singer(),device:deviceId(),...(song.rank!=null?{rank:song.rank,kind:song.kind||''}:{}),...(song.onscreen?{onscreen:true}:{})})});  // rank/kind: metrics; onscreen: a last-resort lyric video
 // Result button states: add, added, failed.
 const ICONS={add:'<path d="M12 5v14M5 12h14"/>',added:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',failed:'<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/>'};
 function icon(node,name){node.className=`result-icon ${name}`;node.innerHTML=`<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;}
@@ -359,7 +359,9 @@ function showResult(song,list=$('results'),wrap=row=>row,index=-1){
  const b=el('button',undefined,index<0?'result':'result enter');if(index>=0)b.style.setProperty('--i',index);
  const image=el('img');image.src=song.thumbnail;image.alt='';const info=el('div');const title=el('strong',song.title);if(song.cached)title.append(el('span','READY','tag'));const note=el('small',undefined,'result-note classic-only');const meta=el('small',`${song.channel} · ${clock(song.duration)}`);
  // karaoke-server: what kind of upload it is (results come official videos first)
- if(KIND_LABEL[song.kind])meta.prepend(el('span',KIND_LABEL[song.kind],`kind kind-${song.kind}`),' ');
+ if(song.onscreen)meta.prepend(el('span',song.onscreen_official?'Lyrics in video':'Lyrics in video · fan upload','kind kind-lyric'),' ');
+ // karaoke-server: a last-resort lyric video says so (onscreen.py)
+ else if(KIND_LABEL[song.kind])meta.prepend(el('span',KIND_LABEL[song.kind],`kind kind-${song.kind}`),' ');
  info.append(title,meta,note);const status=el('span');icon(status,'add');b.append(image,info,status);
  // Classic swaps the channel line for what happened to the add.
  const mark=(name,...text)=>{b.classList.remove('added','failed');b.classList.add(name);note.replaceChildren(...text);};
@@ -367,7 +369,7 @@ function showResult(song,list=$('results'),wrap=row=>row,index=-1){
   // A swipe ends in a click; an open row closes on tap instead of queueing.
   if(b.dataset.dragged){delete b.dataset.dragged;return;}if(b.parentElement?.classList.contains('open')){closeSwipe();return;}
   b.disabled=true;
-  try{const rank=list===$('results')?[...list.querySelectorAll('.result')].indexOf(b):null;const added=await enqueue({id:song.id,...song.parsed,rank:rank>=0?rank:null,kind:song.kind});icon(status,'added');mark('added',el('em','예약됨'),' · added');haptic([10,40,10]);flyToQueue(image);toast(`Added ${song.parsed.title}`);
+  try{const rank=list===$('results')?[...list.querySelectorAll('.result')].indexOf(b):null;const added=await enqueue({id:song.id,...song.parsed,rank:rank>=0?rank:null,kind:song.kind,onscreen:song.onscreen});icon(status,'added');mark('added',el('em','예약됨'),' · added');haptic([10,40,10]);flyToQueue(image);toast(`Added ${song.parsed.title}`);
    if(list===$('results'))setTimeout(()=>leaveSearch(added?.key),450);}
   catch(error){icon(status,'failed');mark('failed',"Couldn't add. Try again");toast(error.message,undefined,'err');}finally{b.disabled=false;}
  };
@@ -524,12 +526,16 @@ async function loadPage(){
  // Placeholder rows hold the space while YouTube answers, under a line that says what's happening.
  if(first)$('results').replaceChildren(searchWaiting(run),...Array.from({length:3},()=>{const row=el('div',undefined,'skeleton');row.setAttribute('aria-hidden','true');row.innerHTML='<i></i><div><i></i><i></i></div>';return row;}));
  try{
-  const results=(await api(`/api/search?q=${encodeURIComponent(search.query)}&page=${search.page}`)).filter(s=>!search.seen.has(s.id));
+  let results=(await api(`/api/search?q=${encodeURIComponent(search.query)}&page=${search.page}`)).filter(s=>!search.seen.has(s.id));
   if(run!==searchRun)return;
   searchWaitTimers.forEach(clearTimeout);
   if(first)$('results').replaceChildren();
+  // karaoke-server: the last resort (lyric videos, words on screen) only while no karaoke-ready version was found
+  if(results.some(s=>!s.onscreen))search.real=true;
+  if(search.real)results=results.filter(s=>!s.onscreen);
   // karaoke-server: every version listed has lyrics that line up with it (only those come back)
-  if(first&&results.length)$('results').append(el('p','✓ Every version here has lyrics that line up','playable-note'));
+  if(first&&results.length&&!results[0].onscreen)$('results').append(el('p','✓ Every version here has lyrics that line up','playable-note'));
+  if(results.length&&results[0].onscreen&&!$('results').querySelector('.onscreen-note'))$('results').append(el('p','No karaoke-ready version yet. These lyric videos show the words on screen instead: sing along with the video. A video without lyrics on screen is checked and left out.','playable-note onscreen-note'));
   results.forEach((s,i)=>{search.seen.add(s.id);showResult(s,$('results'),row=>row,i);});
   // karaoke-server: only playable versions come back, so an empty page doesn't mean the next one is empty too
   $('more').hidden=search.page>=9;$('results').dataset.state=search.seen.size?'':'none';

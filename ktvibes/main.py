@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from .queue import State, VERSION
 from . import metrics  # karaoke-server: local usage/health metrics (cache/metrics.jsonl)
-from . import lyrics, scenery, songbook, spotify, stems, worker, youtube
+from . import lyrics, onscreen, scenery, songbook, spotify, stems, worker, youtube
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = Path(os.environ.get("KTVIBES_CACHE", ROOT / "cache"))
@@ -199,8 +199,27 @@ async def search(q: str = Query(min_length=1, max_length=200), page: int = Query
         rude = youtube.song_name(target["title"]) if target and target.get("explicit") else None
         playable = [r for r in playable if not (r.get("library") and r.get("explicit"))
                     and not (rude and youtube.song_name((r.get("parsed") or {}).get("title", "")) == rude)]
-    metrics.record("search_playable", q=q, page=page, shown=len(playable), hidden=len(results) - len(playable), library=len(mine))
+    # karaoke-server: nothing can be sung, so the last resort: lyric videos, with the words on screen instead of native
+    # lyrics (official first, fan uploads last; a video whose check failed is never offered again). See onscreen.py.
+    offered = []
+    if not playable:
+        refused = {r["id"] for r in results if onscreen_verdict(r["id"]) is False}
+        offered = onscreen.last_resort(results, refused=refused)
+        if state.family == "on" and target and target.get("explicit"):
+            rude = youtube.song_name(target["title"])
+            offered = [r for r in offered if youtube.song_name((r.get("parsed") or {}).get("title", "")) != rude]
+        playable = offered
+    metrics.record("search_playable", q=q, page=page, shown=len(playable), hidden=len(results) - len(playable), library=len(mine),
+                   onscreen=len(offered))
     return playable
+
+def onscreen_verdict(video_id: str) -> bool | None:
+    """karaoke-server: True or False once a lyric video's on-screen lyrics were checked; None when never checked."""
+    try:
+        value = json.loads((CACHE / video_id / "meta.json").read_text(encoding="utf-8")).get("onscreen_lyrics")
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, bool) else None
 
 async def spotify_song(task, found: list[dict], q: str) -> dict | None:
     """karaoke-server: the Spotify song this search is about: the best of its answers whose song is among the YouTube
@@ -243,6 +262,7 @@ class Song(BaseModel):
     rank: int | None = Field(default=None, ge=0, le=200)  # karaoke-server metric: position in the search results it came from
     kind: str = Field(default="", max_length=20)  # karaoke-server metric: that result's kind (official, lyric, ...)
     device: str = Field(default="", max_length=64)  # karaoke-server: the remote's random id; names are unique per phone
+    onscreen: bool = False  # karaoke-server: a last-resort lyric video, sung from the words on screen (onscreen.py)
 
     @field_validator("singer")
     @classmethod
@@ -469,15 +489,20 @@ async def enqueue(song: Song):
     # karaoke-server (beta 2026-11-22): a song in our library without lyrics that line up can't be queued, whichever
     # list it came from (search already lists only playable versions)
     library = prepared_songs()
-    if song.id in library and not lines_up(song.id):
+    verdict = onscreen_verdict(song.id)
+    if verdict is False:
+        raise HTTPException(409, onscreen.MESSAGE)
+    if song.id in library and not lines_up(song.id) and not (verdict or song.onscreen):
         raise HTTPException(409, "This song has no lyrics that line up, so it can't be sung")
     if state.family == "on" and song.id in library and library[song.id]["explicit"]:
         raise HTTPException(409, "Family-friendly mode is on: this song is marked explicit")
     try:
         singer = state.claim_singer(song.singer, song.device) if song.singer else ""
-        item = await state.add(song.id, song.artist, song.title, singer, song.device if singer else "", song.kind)
+        item = await state.add(song.id, song.artist, song.title, singer, song.device if singer else "", song.kind,
+                               onscreen=song.onscreen or bool(verdict))
         metrics.record("queue_add", song=song.id, title=song.title, artist=song.artist, singer=singer, rank=song.rank,
-                       kind=song.kind, from_search=song.rank is not None, queue=len(state.upcoming), cached=song.id in prepared_songs())
+                       kind=song.kind, from_search=song.rank is not None, queue=len(state.upcoming), cached=song.id in prepared_songs(),
+                       onscreen=item.get("onscreen", False))
         return item
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc

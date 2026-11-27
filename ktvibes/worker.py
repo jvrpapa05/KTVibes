@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 import soundfile as sf
-from . import align, guides, songbook, spotify, stems, youtube, lyrics, metrics
+from . import align, guides, onscreen, songbook, spotify, stems, youtube, lyrics, metrics
 
 log = logging.getLogger(__name__)
 TIMING_VERSION = 10  # bump when alignment or guide output changes, so cached timing is rebuilt
@@ -392,6 +392,21 @@ async def run(state, cache: Path):
             item["kind"] = meta["kind"] = item.get("kind") or meta.get("kind") or youtube.kind(meta.get("source_title") or "")
             # scenery may replace a lyric video (its own words clash) or an audio upload (a still picture), user 2026-11-22
             item["scenery_ok"] = item["kind"] in ("lyric", "audio")
+            # karaoke-server: a last-resort lyric video (onscreen.py): with no native lyrics, its words on screen are the
+            # lyrics, so they must be confirmed first; a failed check is kept, and the song is not played
+            if item.get("onscreen") and not item.get("lyrics"):
+                if not isinstance(meta.get("onscreen_lyrics"), bool):
+                    if not item["video"]:
+                        raise onscreen.NoLyricsOnScreen("The lyric video could not be downloaded, so it can't be sung: try again later")
+                    meta["onscreen_check"] = await asyncio.to_thread(onscreen.check, folder / "video.mp4", stems.path(folder, "vocals"))
+                    meta["onscreen_lyrics"] = meta["onscreen_check"]["ok"]
+                    save_meta(folder, meta)
+                if not meta["onscreen_lyrics"]:
+                    raise onscreen.NoLyricsOnScreen(onscreen.MESSAGE)
+                # the TV always shows this video (never scenery, blurred or hidden): it is the lyrics
+                item["onscreen_lyrics"], item["scenery_ok"] = True, False
+            elif item.get("onscreen"):
+                item.pop("onscreen")  # LRCLIB had the lyrics after all: an ordinary song
             # karaoke-server: the album cover from Spotify, looked up once per song (kept in meta.json)
             if meta.get("cover"):
                 item["cover"] = meta["cover"]
@@ -415,7 +430,8 @@ async def run(state, cache: Path):
                            separation_model=meta.get("separation_model", "htdemucs") if separated else "", **timing,
                            lyrics_lines=len(item.get("lyrics") or []), aligned=timed.get("aligned"),
                            video=item.get("video", False), video_fps=round(youtube.video_fps(video_file)) if video_file.is_file() else 0,
-                           video_30=item.get("video_30", False), video_warning=item.get("video_warning", ""))
+                           video_30=item.get("video_30", False), video_warning=item.get("video_warning", ""),
+                           onscreen_lyrics=item.get("onscreen_lyrics", False))
             item.pop("since", None); item.pop("expect", None)
             state.promote()
         except Removed:
@@ -428,6 +444,8 @@ async def run(state, cache: Path):
             missing = missing_tools()
             # A missing ffmpeg or Node.js surfaces as an obscure "WinError 2"; say what to fix instead.
             item["error"] = f"{' and '.join(missing)} not found. Install, open a new terminal, restart KTVibes, then Retry." if missing else youtube.explain(exc)
+            if isinstance(exc, onscreen.NoLyricsOnScreen):
+                item["error"] = str(exc)  # karaoke-server: said as it is
             metrics.record("prep_error", song=item["id"], title=item["title"], error=str(exc)[-300:], bot_check=bool(youtube.BOT_CHECK.search(str(exc))))
             state.promote()
         await state.broadcast()

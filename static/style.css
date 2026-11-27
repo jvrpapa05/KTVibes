@@ -247,3 +247,5 @@ body.still :is(.tv-tools,.tv-bottom,.open-remote){opacity:0;pointer-events:none}
 .pause-icon{font-size:1.1em;color:var(--lime)}
 /* karaoke-server: someone is singing but the lyrics have no line for it (lyrics.uncovered) */
 .lyrics-gap{position:fixed;left:50%;bottom:16vh;z-index:3;transform:translateX(-50%);margin:0;padding:.35em 1em;border-radius:999px;background:#0000008c;color:#ffffffc4;font:600 clamp(16px,1.6vw,28px)/1.2 'Space Grotesk',sans-serif;white-space:nowrap}
+/* karaoke-server: a last-resort lyric video is the lyrics: no shade over it, no "No lyrics found" (onscreen.py) */
+.tv[data-onscreen=yes] #video-shade{display:none!important}.tv[data-onscreen=yes] #no-lyrics{display:none!important}

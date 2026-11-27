@@ -434,12 +434,14 @@ class State:
         if old and old.casefold() in self.profiles and new.casefold() not in self.profiles:
             self.profiles[new.casefold()] = self.profiles.pop(old.casefold())
 
-    async def add(self, video_id, artist, title, singer="", device="", kind=""):
+    async def add(self, video_id, artist, title, singer="", device="", kind="", onscreen=False):
         if self.queued(video_id):
             raise ValueError("That song is already in the queue")
         item = self.entry(video_id, artist, title, singer)
         if kind in KIND_LABELS:
             item["kind"] = kind  # karaoke-server: what search called this video (official, lyric, ...), shown on the TV
+        if onscreen:
+            item["onscreen"] = True  # karaoke-server: a last-resort lyric video, sung from the words on screen (onscreen.py)
         if device:
             self.owners[item["key"]] = device
         self.upcoming.append(item)

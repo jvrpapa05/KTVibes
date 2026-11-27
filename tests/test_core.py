@@ -1618,3 +1618,31 @@ class SeparationTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 self.separate.download(path=target)
             self.assertEqual(list(Path(folder).iterdir()), [])
+
+class OnScreenLyricsTests(unittest.TestCase):
+    # karaoke-server: a lyric video counts only when changing text is on screen while the lead vocals sing
+    def test_changing_lyrics_pass(self):
+        from ktvibes import onscreen
+        frames = [[(f"line number {i} of the song", 0.9)] for i in range(40)]
+        self.assertTrue(onscreen.verdict(frames)["ok"])
+
+    def test_a_title_on_a_still_picture_fails(self):
+        from ktvibes import onscreen
+        frames = [[("Tantanan", 0.95)] for _ in range(90)]
+        result = onscreen.verdict(frames)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["lines"], 0)
+
+    def test_a_few_captions_in_a_music_video_fail(self):
+        from ktvibes import onscreen
+        frames = [[] for _ in range(80)]
+        for i in range(10):
+            frames[i * 8] = [(f"caption {i} here", 0.9)]
+        self.assertFalse(onscreen.verdict(frames)["ok"])
+
+    def test_only_sung_frames_count(self):
+        from ktvibes import onscreen
+        # lyrics on screen whenever someone sings; a long instrumental with no text doesn't count against it
+        frames = [[(f"sung line {i}", 0.9)] if i < 25 else [] for i in range(60)]
+        self.assertFalse(onscreen.verdict(frames)["ok"])  # 25 of 60 frames: under half
+        self.assertTrue(onscreen.verdict(frames, [i < 25 for i in range(60)])["ok"])

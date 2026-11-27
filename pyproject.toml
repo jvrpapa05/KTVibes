@@ -23,6 +23,7 @@ dependencies = [
     "beartype>=0.18",
     "rotary-embedding-torch>=0.6.5,<0.7",
     "librosa>=0.10",
+    "rapidocr-onnxruntime>=1.4",
 ]
 
 [project.scripts]

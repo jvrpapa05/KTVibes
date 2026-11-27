@@ -310,3 +310,49 @@ class APITests(unittest.TestCase):
             self.assertEqual(self.client.get('/api/search', params={'q': '晴天', 'page': 2}).status_code, 200)
             search.assert_called_once_with('晴天', 2)
             self.assertEqual(self.client.get('/api/search', params={'q': 'x', 'page': 10}).status_code, 422)
+
+
+class OnScreenLyricsAPITests(unittest.TestCase):
+    setUp, tearDown = APITests.setUp, APITests.tearDown
+    # karaoke-server (user, 2026-11-27): no karaoke-ready version -> lyric videos as the last resort, words on screen
+    official = {'id': 'officiallyr', 'title': 'Antonio Bathan - Tantanan (Official Lyric Video)', 'channel': 'Antonio Bathan',
+                'duration': 281, 'kind': 'lyric', 'parsed': {'artist': 'Antonio Bathan', 'title': 'Tantanan'}}
+    fan = {'id': 'fanlyrics01', 'title': 'Antonio Bathan - Tantanan (Lyrics)', 'channel': 'Zoroco', 'duration': 161,
+           'kind': 'lyric', 'parsed': {'artist': 'Antonio Bathan', 'title': 'Tantanan'}}
+    audio = {'id': 'topicaudio1', 'title': 'Tantanan', 'channel': 'Antonio Bathan - Topic', 'duration': 279, 'kind': 'audio',
+             'parsed': {'artist': 'Antonio Bathan', 'title': 'Tantanan'}}
+
+    def search(self, q='tantanan'):
+        with patch.object(self.main.youtube, 'search', return_value=[self.fan, self.official, self.audio]), \
+             patch.object(self.main, 'lyric_records', AsyncMock(return_value=[])):
+            return self.client.get('/api/search', params={'q': q}).json()
+
+    def test_lyric_videos_are_the_last_resort_official_first(self):
+        found = self.search()
+        self.assertEqual([r['id'] for r in found], ['officiallyr', 'fanlyrics01'])  # never the audio upload
+        self.assertTrue(all(r['onscreen'] for r in found))
+        self.assertEqual([r['onscreen_official'] for r in found], [True, False])
+
+    def test_a_video_that_failed_the_check_is_not_offered_or_queued_again(self):
+        folder = Path(self.temp.name) / 'fanlyrics01'
+        folder.mkdir()
+        (folder / 'meta.json').write_text('{"onscreen_lyrics": false}', encoding='utf-8')
+        self.assertEqual([r['id'] for r in self.search()], ['officiallyr'])
+        response = self.client.post('/api/queue', json={'id': 'fanlyrics01', 'artist': 'Antonio Bathan', 'title': 'Tantanan', 'onscreen': True})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('no lyrics on screen', response.json()['detail'])
+
+    def test_queueing_a_lyric_video_marks_it_for_the_check(self):
+        response = self.client.post('/api/queue', json={'id': 'officiallyr', 'artist': 'Antonio Bathan', 'title': 'Tantanan', 'onscreen': True})
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.json()['onscreen'])
+
+    def test_a_confirmed_library_lyric_video_can_be_queued_without_native_lyrics(self):
+        folder = Path(self.temp.name) / 'officiallyr'
+        folder.mkdir()
+        (folder / 'meta.json').write_text('{"artist": "Antonio Bathan", "title": "Tantanan", "onscreen_lyrics": true}', encoding='utf-8')
+        for name in ('no_vocals.wav', 'vocals.wav'):
+            (folder / name).touch()
+        response = self.client.post('/api/queue', json={'id': 'officiallyr', 'artist': 'Antonio Bathan', 'title': 'Tantanan'})
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.json()['onscreen'])
