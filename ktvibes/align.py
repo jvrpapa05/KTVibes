@@ -148,6 +148,38 @@ SHIFT_RATIO = 2.5
 SHIFT_MIN = 1.5  # smaller offsets are left to the word alignment
 SHIFT_GAIN = 0.08  # more of the lines must align: at least this share of them
 
+def free_stamps(lines: list[dict], samples, rate: int) -> dict[int, float]:
+    """karaoke-server: where each line starts when its stamp is NOT trusted: every word of the lyrics is aligned over
+    the whole song in one pass, in order. For lyrics whose words are right and whose stamps are broken ("I Won't Last
+    A Day Without You": LRCLIB lines bunched under a second apart; 21 s off -> 0.1 s). On the 30 songs the room voted
+    in sync it was as accurate as the stamps (study 2026-11-28), but it has nothing to hold on to when the lyrics
+    miss parts of the song, so the caller keeps it only if the words are then heard where they are shown (heard.py).
+    {line index: start in seconds}; raises when the lyrics can't be aligned."""
+    import torch
+    import torchaudio.functional as F
+    with _lock:
+        bundle, model = _load()
+        device = next(model.parameters()).device
+        mono = torch.as_tensor(samples, dtype=torch.float32)
+        mono = mono.mean(dim=1) if mono.ndim == 2 else mono
+        audio = F.resample(mono, rate, bundle.sample_rate)
+        chunk, parts = 30 * bundle.sample_rate, []
+        with torch.inference_mode():
+            for start in range(0, len(audio), chunk):
+                clip = audio[start:start + chunk]
+                if len(clip) >= bundle.sample_rate // 10:
+                    parts.append(model(clip[None].to(device))[0][0])
+        emission = torch.cat(parts)
+        fps = emission.shape[0] / (len(audio) / bundle.sample_rate)
+        words = {}
+        for index, line in enumerate(lines):
+            if line["text"] and not line.get("exact"):
+                found = [w for w in spoken_letters(split_units(line["text"])) if w]
+                if found:
+                    words[index] = found
+        spans = iter(bundle.get_aligner()(emission, bundle.get_tokenizer()([w for index in words for w in words[index]])))
+        return {index: [next(spans) for _ in words[index]][0][0].start / fps for index in words}
+
 def _shift_candidates(lines: list[dict], samples, rate: int) -> list[float]:
     import numpy as np
     import torch

@@ -1807,3 +1807,45 @@ class HeardTests(unittest.IsolatedAsyncioTestCase):
                 # lyrics whose words are sung are left alone
                 (folder / "timed.json").write_text(json.dumps({"entry_error": 0.1, "heard": {"heard": 10, "agree": 0.8}, "lines": []}))
                 self.assertIsNone(await worker.better_timing(folder, wrong, ["Artist", "Song"], 200, {}))
+
+    async def test_unheard_lyrics_with_no_better_record_are_timed_without_their_stamps(self):
+        # karaoke-server: "I Won't Last A Day Without You": right words, broken stamps. Kept only if then heard in place.
+        from ktvibes import worker, lyrics
+        raw = "".join(f"[00:{10 + n:02d}.00]nobody knows the trouble {n}\n" for n in range(10))
+        async def candidates(*a, **k):
+            raise RuntimeError("LRCLIB is down")
+        for agree, kept in ((0.95, True), (0.3, False)):
+            calls = []
+            def timed(folder, text, vocals, lines, length=None, free=False):
+                calls.append(free)
+                (folder / "timed.json").write_text(json.dumps({"entry_error": 0.2, "free": free, "heard": {"heard": 10, "agree": agree}, "lines": lines}))
+                return lines
+            with tempfile.TemporaryDirectory() as temp:
+                folder = Path(temp)
+                (folder / "lyrics.lrc").write_text(raw)
+                (folder / "vocals.wav").write_bytes(b"")
+                (folder / "timed.json").write_text(json.dumps({"entry_error": 0.1, "heard": {"heard": 10, "agree": 0.2}, "lines": []}))
+                with unittest.mock.patch.object(lyrics, "candidates", candidates), unittest.mock.patch.object(worker, "timed_lyrics", timed):
+                    meta = {"lyric_offset": 1.5}
+                    got = await worker.better_timing(folder, raw, ["Artist", "Song"], 200, meta)
+                    now = json.loads((folder / "timed.json").read_text())
+                    self.assertEqual(calls, [True])
+                    self.assertEqual((got is not None, now.get("free", False), now["heard"]["agree"]), (kept, kept, agree if kept else 0.2))
+                    self.assertEqual((folder / "lyrics.lrc").read_text(), raw)            # the words stay
+                    self.assertFalse((folder / "timing-trial").exists())
+                    self.assertIsNone(await worker.better_timing(folder, raw, ["Artist", "Song"], 200, meta))  # looked at once
+                    self.assertEqual(calls, [True])
+
+    def test_free_timing_takes_the_line_starts_from_the_aligner_and_keeps_the_order(self):
+        from ktvibes import worker, lyrics
+        import numpy as np, soundfile as sf
+        raw = "[00:01.00]one two three\n[00:01.50]♪\n[00:02.00]four five six\n[00:02.50]seven eight nine\n"
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            sf.write(folder / "vocals.wav", np.zeros((8000 * 40, 1), dtype="float32"), 8000)
+            with unittest.mock.patch.object(worker.align, "free_stamps", return_value={0: 10.2, 2: 30.2, 3: 20.2}), \
+                    unittest.mock.patch.object(worker.align, "align", lambda *a: set()), \
+                    unittest.mock.patch.object(worker.align, "song_shift", side_effect=AssertionError("stamps are not trusted")):
+                lines = worker.timed_lyrics(folder, raw, folder / "vocals.wav", lyrics.parse_lrc(raw), free=True)
+            self.assertEqual([l["t"] for l in lines], [10.0, 10.0, 30.0, 30.0])  # in order: a line never starts before the one before it
+            self.assertTrue(json.loads((folder / "timed.json").read_text())["free"])

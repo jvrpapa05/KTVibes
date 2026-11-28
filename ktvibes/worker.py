@@ -70,28 +70,35 @@ def fetch_video(video_id, folder, progress):
 # repeat of the melody); a big shift is only for videos that really are longer (a story intro).
 MATCHED_LENGTH = 5.0
 
-def timed_lyrics(folder: Path, raw: str, samples_path: Path, lines: list[dict], lyric_duration: float | None = None) -> list[dict]:
-    """Word timing and guides for these lyrics, reused from timed.json when the LRC text is unchanged."""
+def timed_lyrics(folder: Path, raw: str, samples_path: Path, lines: list[dict], lyric_duration: float | None = None, free: bool = False) -> list[dict]:
+    """Word timing and guides for these lyrics, reused from timed.json when the LRC text is unchanged.
+    karaoke-server: `free` times them without trusting their stamps (align.free_stamps); it raises if that can't be done."""
     key = f"{TIMING_VERSION}:{hashlib.sha256(raw.encode()).hexdigest()}"
     try:
         cached = json.loads((folder / "timed.json").read_text(encoding="utf-8"))
         # Energy-only timing (the aligner failed) is retried once per run, not on every play.
-        if cached.get("key") == key and (cached.get("aligned", True) or (folder / "timed.json").stat().st_mtime >= STARTED):
+        if not free and cached.get("key") == key and (cached.get("aligned", True) or (folder / "timed.json").stat().st_mtime >= STARTED):
             return cached["lines"]
     except (OSError, ValueError, KeyError):
         pass
     samples, rate = sf.read(samples_path, dtype="float32")
     energy = lyrics.envelope(samples, rate)
     matched = bool(lyric_duration) and abs(len(samples) / rate - lyric_duration) <= MATCHED_LENGTH
-    if shift := (lyrics.find_shift(lines, energy, limit=MATCHED_LENGTH, far=False) if matched else lyrics.find_shift(lines, energy)):
+    if free:
+        last = 0.0
+        stamps = align.free_stamps(lines, samples, rate)
+        for index, line in enumerate(lines):  # lines keep their order; one without letters stays with the line before it
+            line["t"] = last = max(last, round(max(0.0, stamps[index] - 0.2), 2) if index in stamps else last)
+        log.info("Lyrics for %s timed without their stamps", folder.name)
+    elif shift := (lyrics.find_shift(lines, energy, limit=MATCHED_LENGTH, far=False) if matched else lyrics.find_shift(lines, energy)):
         log.info("Lyrics for %s shifted %+.2fs to match the vocals", folder.name, shift)
         lyrics.shift_lines(lines, shift)
-    if any(moved := lyrics.shift_sections(lines, energy)):
+    if not free and any(moved := lyrics.shift_sections(lines, energy)):
         log.info("Lyric sections for %s moved %s to match the vocals", folder.name, moved)
     aligned = True
     try:
         # karaoke-server: a whole-song shift the vocal energy missed, found by the aligner itself (align.song_shift)
-        if shift := align.song_shift(lines, samples, rate):
+        if not free and (shift := align.song_shift(lines, samples, rate)):
             log.info("Lyrics for %s shifted %+.2fs: the words are sung there", folder.name, shift)
             lyrics.shift_lines(lines, shift)
         # Forced alignment on the vocals; lines it cannot place keep the energy estimate.
@@ -110,7 +117,7 @@ def timed_lyrics(folder: Path, raw: str, samples_path: Path, lines: list[dict], 
     # whose lyrics line up (see main.lines_up)
     entry = lyrics.entry_error(samples, rate, lines)
     gaps = lyrics.uncovered(samples, rate, lines, len(samples) / rate)  # karaoke-server: sung parts with no lyrics
-    temporary.write_text(json.dumps({"key": key, "aligned": aligned, "entry_error": entry, "heard": said, "uncovered": gaps, "lines": lines}, ensure_ascii=False), encoding="utf-8")
+    temporary.write_text(json.dumps({"key": key, "aligned": aligned, "entry_error": entry, "heard": said, "free": free, "uncovered": gaps, "lines": lines}, ensure_ascii=False), encoding="utf-8")
     temporary.replace(folder / "timed.json")
     return lines
 
@@ -155,7 +162,9 @@ async def better_timing(folder: Path, raw: str, identity: list, duration: float,
         found = await lyrics.candidates(*identity, duration, (meta.get("source_title") or "",), exhaustive=True)
     except Exception:
         log.exception("Other lyric timings unavailable for %s", folder.name)
-        return None
+        if not unheard:
+            return None
+        found = []  # the words can still be timed without their stamps (below)
     lyrics.real_lengths([c for c in found if c.get("syncedLyrics")])
     # The start detector can be fooled by humming or a chant before the first line ("Anong Daratnan": 11.5 s, yet
     # fine), so another timing is used only when more LRCLIB records agree on its start than on the current one's.
@@ -197,10 +206,28 @@ async def better_timing(folder: Path, raw: str, identity: list, duration: float,
         elif not heard.failed(said) and tried is not None and (abs(tried) < best[0] - 1 or (verdict == "flagged" and abs(tried) <= ENTRY_LIMIT and best[1] is None)):
             best = (abs(tried), text, lines, c)
             (trial / "timed.json").replace(folder / "timed.json")
+    freed = None
+    if unheard and best[1] is None and not timed.get("free"):
+        # karaoke-server: no record's words are sung where they are shown. The words may still be right and their stamps
+        # broken: time them without the stamps, and keep that only if they are then heard where they are shown.
+        try:
+            trial.mkdir(exist_ok=True)
+            (trial / "timed.json").unlink(missing_ok=True)
+            lines = await asyncio.to_thread(timed_lyrics, trial, raw, stems.path(folder, "vocals"), lyrics.parse_lrc(raw), meta.get("lyrics_duration"), True)
+            said = json.loads((trial / "timed.json").read_text(encoding="utf-8")).get("heard")
+            log.info("Lyrics for %s timed without their stamps: heard %s", folder.name, said)
+            if said and not heard.failed(said) and said.get("heard", 0) >= heard.MIN_HEARD and (said.get("agree") or 0) > best_heard:
+                (trial / "timed.json").replace(folder / "timed.json")
+                freed = lines
+        except Exception:
+            log.exception("Lyrics for %s could not be timed without their stamps", folder.name)
     if trial.exists():
         for f in trial.iterdir():
             f.unlink()
         trial.rmdir()
+    if freed is not None:
+        meta.pop("lyric_offset", None)
+        return raw, freed
     if best[1] is None:
         return None
     (folder / "lyrics.lrc").write_text(best[1], encoding="utf-8")
