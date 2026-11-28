@@ -330,9 +330,9 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValidationError):
             Song(id='abcdefghijk', artist='Queen', title='Song', singer='x' * 41)
 
-    async def test_each_singer_gets_their_own_key_and_every_song_starts_at_10_percent_vocals(self):
-        # karaoke-server: each song plays with its singer's settings; the guide vocals are not one of them (user,
-        # 2026-11-28): every song starts at 10%, so everyone hears that the voice can be taken out.
+    async def test_each_singer_gets_their_own_mix_and_key_and_a_new_name_starts_at_10_percent_vocals(self):
+        # karaoke-server: each song plays with its singer's settings. A new name starts at 10% guide vocals (user,
+        # 2026-11-28: "at new username creation"), so every new singer hears that the voice can be taken out.
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'queue.json'
             state = State(); state.restore(path, seed=lambda: {})
@@ -347,7 +347,7 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(state.current['singer'], singer)
             await sing('aaaaaaaaaaa', 'Anna')
             await state.control({'action': 'vocal', 'value': 1})
-            self.assertEqual(state.vocal, 1)                       # changed live, for this song
+            self.assertEqual(state.vocal, 1)                       # Anna's choice, kept for her songs
             await state.control({'action': 'key', 'value': -2})
             await sing('bbbbbbbbbbb', 'Bea')
             self.assertEqual((state.vocal, state.key, state.speed), (0.1, 0, 1.0))  # a first-timer starts from the defaults
@@ -355,13 +355,13 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
             await state.control({'action': 'speed', 'value': 0.9})
             await state.control({'action': 'key', 'value': 1})
             await sing('ccccccccccc', 'anna')  # same singer, any case
-            self.assertEqual((state.vocal, state.key, state.speed), (0.1, -2, 1.0))
+            self.assertEqual((state.vocal, state.key, state.speed), (1, -2, 1.0))
             await sing('ddddddddddd', 'Bea')
-            self.assertEqual((state.vocal, state.key, state.speed), (0.1, 1, 1.0))  # karaoke-server: speed removed, always 100%
+            self.assertEqual((state.vocal, state.key, state.speed), (0.5, 1, 1.0))  # karaoke-server: speed removed, always 100%
             await sing('eeeeeeeeeee', '')  # no name: the defaults, nothing saved
             await state.control({'action': 'key', 'value': 4})
             self.assertEqual((state.key, state.profiles['bea']['key']), (4, 1))
-            self.assertNotIn('vocal', state.profiles['anna'])
+            self.assertEqual(state.vocal, 0.1)                     # a song without a name: the defaults
             await state.broadcast()
             again = State(); again.restore(path, seed=lambda: {})
             self.assertEqual({k: again.profiles['anna'][k] for k in ('key', 'speed')}, {'key': -2, 'speed': 1.0})
@@ -387,8 +387,8 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.profiles['bea']['video_mode'], 'show')
 
     async def test_a_phone_edits_its_own_profile_not_the_singer_on_stage(self):
-        # karaoke-server: PC changes the key and the vocals during Vince's song: PC's key is saved for PC's songs,
-        # Vince's song and profile don't change. The vocals are never saved: PC's song starts at 10% like every song.
+        # karaoke-server: PC changes the key and the vocals during Vince's song: they are saved for PC's songs;
+        # Vince's song and profile don't change.
         state = State()
         state.claim_singer('Vince', 'phone-v'); state.claim_singer('PC', 'phone-pc')
         (await state.add('aaaaaaaaaaa', 'A', 'S', 'Vince'))['status'] = 'ready'
@@ -396,15 +396,15 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         state.promote()
         await state.control({'action': 'vocal', 'value': 0.2, 'singer': 'Vince', 'device': 'phone-v'})  # Vince, live
         await state.control({'action': 'key', 'value': 1, 'singer': 'Vince', 'device': 'phone-v'})
-        await state.control({'action': 'vocal', 'value': 0.51, 'singer': 'PC', 'device': 'phone-pc'})   # PC: ignored
+        await state.control({'action': 'vocal', 'value': 0.51, 'singer': 'PC', 'device': 'phone-pc'})   # PC: saved for later
         await state.control({'action': 'key', 'value': 3, 'singer': 'pc', 'device': 'phone-pc'})        # PC: saved for later
         self.assertEqual((state.vocal, state.key), (0.2, 1))         # Vince's song keeps sounding as Vince set it
         self.assertEqual(state.profiles['vince']['key'], 1)
         self.assertEqual(state.profiles['pc']['key'], 3)
-        self.assertNotIn('vocal', state.profiles['pc'])
+        self.assertEqual(state.profiles['pc']['vocal'], 0.51)
         self.assertIn('profiles', state.snapshot())
         state.advance()                                               # PC's turn: PC's settings load
-        self.assertEqual((state.vocal, state.key), (0.1, 3))
+        self.assertEqual((state.vocal, state.key), (0.51, 3))
         with self.assertRaisesRegex(ValueError, 'reload'):            # a phone that doesn't hold the name can't edit it
             await state.control({'action': 'key', 'value': 5, 'singer': 'Vince', 'device': 'phone-pc'})
         self.assertEqual(state.profiles['vince']['key'], 1)

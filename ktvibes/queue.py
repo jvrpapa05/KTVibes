@@ -55,11 +55,10 @@ ACCOUNT_LIFE = float(os.environ.get("KTVIBES_ACCOUNT_LIFE") or 3 * 3600)  # seco
 EXPIRED = "Names are kept for 3 hours. Enter your name to keep singing."
 # karaoke-server: every room setting a singer can set is part of their profile. Not the song position, and not the
 # lyric timing nudge (offset): that corrects the song itself and is kept per song in meta.json.
-# karaoke-server (user, 2026-11-28): the guide vocals are not part of it. Every song starts at VOCAL_START, so everyone
-# hears that the singer's voice can be taken out; it can be changed during the song, for that song.
-PROFILE = ("music", "key", "speed", "lyric_scale", "video_mode", "lyric_mode")
-VOCAL_START = 0.1
-DEFAULTS = {"music": 1.0, "key": 0, "speed": 1.0, "lyric_scale": 1.5, "video_mode": "show", "lyric_mode": "two"}
+PROFILE = ("vocal", "music", "key", "speed", "lyric_scale", "video_mode", "lyric_mode")
+# karaoke-server (user, 2026-11-28): what a new name starts with. Guide vocals at 10%, so every new singer hears that
+# the voice can be taken out; what they then choose is theirs until the account is deleted.
+DEFAULTS = {"vocal": 0.1, "music": 1.0, "key": 0, "speed": 1.0, "lyric_scale": 1.5, "video_mode": "show", "lyric_mode": "two"}
 HISTORY = 200  # remembered plays, for the remote's "Recent" list
 UNDO_SECONDS = 15  # how long a removal can be taken back
 SAVE_EVERY = 10  # seconds between queue.json writes for position reports alone
@@ -93,7 +92,7 @@ class State:
         self.player = None
         self.playing = True
         self.offset = 0.0
-        self.vocal = VOCAL_START
+        self.vocal = DEFAULTS["vocal"]
         self.music = 1.0  # instrumental (backing track) volume
         self.guide = "off"  # karaoke-server: pronunciation guides removed (English-only users); always off
         self.lyric_scale = 1.5
@@ -143,7 +142,7 @@ class State:
         """Lyrics are large and only the TV draws them, so broadcasts leave them out (see broadcast)."""
         brief = lambda item: item if lyrics or item is None else {k: v for k, v in item.items() if k != "lyrics"}
         return {"current": brief(self.current), "upcoming": [brief(i) for i in self.upcoming], "playing": self.playing,
-                "offset": self.offset, "vocal": self.vocal, "music": self.music, "guide": self.guide, "guides": self.guides(), "lyric_scale": self.lyric_scale, "video_mode": self.video_mode, "lyric_mode": self.lyric_mode, "lyric_video": self.lyric_video, "family": self.family, "theme": self.theme, "room_ends": self.room_ends, "time_up": self.time_up(), "profiles": self.profiles, "defaults": {**DEFAULTS, "vocal": VOCAL_START}, "speed": self.speed, "key": self.key, "seek_id": self.seek_id, "position": self.position,
+                "offset": self.offset, "vocal": self.vocal, "music": self.music, "guide": self.guide, "guides": self.guides(), "lyric_scale": self.lyric_scale, "video_mode": self.video_mode, "lyric_mode": self.lyric_mode, "lyric_video": self.lyric_video, "family": self.family, "theme": self.theme, "room_ends": self.room_ends, "time_up": self.time_up(), "profiles": self.profiles, "defaults": DEFAULTS, "speed": self.speed, "key": self.key, "seek_id": self.seek_id, "position": self.position,
                 "transition_until": self.transition_until, "server_time": time.time(),
                 "player_connected": self.player is not None, "player_audio": self.player is not None and self.audio,
                 "revision": self.revision, "build": self.build, "version": VERSION, "phones": sum(role == "remote" for role in self.clients.values()),
@@ -372,7 +371,6 @@ class State:
         profile = self.profiles.get(singer.casefold(), {}) if singer else {}
         for name in PROFILE:  # a singer without saved settings gets the defaults, not the last singer's
             setattr(self, name, profile.get(name, DEFAULTS[name]))
-        self.vocal = VOCAL_START
         self.video_mode = "show"  # karaoke-server: Blur/Hide removed (2026-11-22); older profiles may still hold them
         self.speed = 1.0  # karaoke-server: speed removed (2026-11-22); older profiles may still hold one
 
@@ -479,7 +477,7 @@ class State:
         stage isn't theirs (someone else's song, or nothing playing): then the change is saved for later and the room
         is left alone. On their own song, or on a song without a name, changes apply live as usual."""
         name = message.get("singer")
-        if not name or message.get("action") not in (*PROFILE, "vocal"):
+        if not name or message.get("action") not in PROFILE:
             return False
         self.expire_accounts()
         holder = self.singers.get(str(name).casefold())
@@ -579,8 +577,6 @@ class State:
                 await self.send(self.player, {"type": "hide", "id": str(message.get("id", ""))[:32]})
             return
         if self.own_profile_edit(message):
-            if action == "vocal":
-                return  # the guide vocals are only changed live, during the singer's own song
             key = str(message["singer"]).casefold()
             profile = {**DEFAULTS, **self.profiles.get(key, {})}  # a first-timer's profile starts from the defaults
             profile[action] = self.setting(action, message.get("value"))
@@ -698,7 +694,8 @@ class State:
             self.music = max(0, min(1, number(message["value"])))
             self.remember_profile()
         elif action == "vocal":
-            self.vocal = max(0, min(1, number(message["value"])))  # for this song only: the next starts at VOCAL_START
+            self.vocal = max(0, min(1, number(message["value"])))
+            self.remember_profile()
         elif action == "remove":
             # karaoke-server: the queue is just the list of songs to play; nobody removes songs from it.
             raise ValueError("Songs can't be removed from the queue")
