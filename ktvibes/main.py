@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from .queue import State, VERSION
 from . import metrics  # karaoke-server: local usage/health metrics (cache/metrics.jsonl)
-from . import lyrics, onscreen, scenery, songbook, spotify, stems, worker, youtube
+from . import heard, lyrics, onscreen, scenery, songbook, spotify, stems, worker, youtube
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = Path(os.environ.get("KTVIBES_CACHE", ROOT / "cache"))
@@ -310,6 +310,8 @@ def lines_up(video_id: str) -> bool:
     verdict = worker.vote_verdict(folder, meta)  # karaoke-server: the room's votes come first
     if verdict:
         return verdict == "confirmed"
+    if heard.failed(timed.get("heard")):
+        return False  # karaoke-server: other words are sung than these lyrics say (heard.py)
     length = meta.get("lyrics_duration")
     if length and abs(float(meta.get("duration") or 0) - float(length)) <= youtube.LYRICS_TOLERANCE:
         return True  # (a matching length with a late timing is caught when the song is prepared: worker.better_timing)

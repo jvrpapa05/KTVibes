@@ -6,10 +6,10 @@ import sys
 import time
 from pathlib import Path
 import soundfile as sf
-from . import align, guides, onscreen, songbook, spotify, stems, youtube, lyrics, metrics
+from . import align, guides, heard, onscreen, songbook, spotify, stems, youtube, lyrics, metrics
 
 log = logging.getLogger(__name__)
-TIMING_VERSION = 11  # bump when alignment or guide output changes, so cached timing is rebuilt (11: align.song_shift)
+TIMING_VERSION = 12  # bump when alignment or guide output changes, so cached timing is rebuilt (11: align.song_shift; 12: heard.check)
 LYRICS_RECHECK = 7 * 86400  # a song LRCLIB had no lyrics for is looked up again after this long
 STARTED = time.time()  # energy-only timing (aligner failed) cached before this run is retried once
 
@@ -100,13 +100,17 @@ def timed_lyrics(folder: Path, raw: str, samples_path: Path, lines: list[dict], 
         log.exception("Forced alignment unavailable for %s", folder.name)
         aligned = False
     lyrics.time_units(lines, energy)
+    # karaoke-server: are these the words that are sung? (heard.py; None: nothing to judge)
+    said = heard.check(samples_path, lines)
+    if heard.failed(said):
+        log.info("Lyrics for %s are not what is sung: %s", folder.name, said)
     lines = lyrics.add_jyutping(guides.add_hangul(lyrics.add_korean_romanization(lyrics.add_pinyin(lyrics.add_romaji(lines)))))
     temporary = folder / "timed.tmp"
     # karaoke-server: how far the first line is from the singer's first phrase; search only offers library songs
     # whose lyrics line up (see main.lines_up)
     entry = lyrics.entry_error(samples, rate, lines)
     gaps = lyrics.uncovered(samples, rate, lines, len(samples) / rate)  # karaoke-server: sung parts with no lyrics
-    temporary.write_text(json.dumps({"key": key, "aligned": aligned, "entry_error": entry, "uncovered": gaps, "lines": lines}, ensure_ascii=False), encoding="utf-8")
+    temporary.write_text(json.dumps({"key": key, "aligned": aligned, "entry_error": entry, "heard": said, "uncovered": gaps, "lines": lines}, ensure_ascii=False), encoding="utf-8")
     temporary.replace(folder / "timed.json")
     return lines
 
@@ -128,16 +132,19 @@ def vote_verdict(folder: Path, meta: dict) -> str | None:
     return "flagged" if down >= 2 and down > up else "confirmed" if up >= 2 and up > down else None
 
 async def better_timing(folder: Path, raw: str, identity: list, duration: float, meta: dict):
-    """(raw, lines) of another LRCLIB timing that starts with the singer, or None."""
+    """(raw, lines) of another LRCLIB timing that starts with the singer, or None. Also (karaoke-server, heard.py):
+    when the words are not what is sung, of another LRCLIB record whose words are."""
     try:
-        entry = json.loads((folder / "timed.json").read_text(encoding="utf-8")).get("entry_error")
+        timed = json.loads((folder / "timed.json").read_text(encoding="utf-8"))
+        entry = timed.get("entry_error")
     except (OSError, ValueError):
         return None
+    unheard = heard.failed(timed.get("heard"))
     tried_key = hashlib.sha256(raw.encode()).hexdigest()[:16]
     # a version someone picked on the remote stays; each timing is looked at once
     verdict = vote_verdict(folder, meta)  # the room's votes outrank the start detector
-    tried_key += ":" + (verdict or "")
-    off = verdict == "flagged" or (entry is not None and abs(entry) > ENTRY_LIMIT)
+    tried_key += ":" + (verdict or "") + (":unheard" if unheard else "")
+    off = verdict == "flagged" or (entry is not None and abs(entry) > ENTRY_LIMIT) or unheard
     if not off or verdict == "confirmed" or not raw or meta.get("lyrics_chosen") or meta.get("timings_tried") == tried_key:
         return None
     meta["timings_tried"] = tried_key
@@ -163,21 +170,31 @@ async def better_timing(folder: Path, raw: str, identity: list, duration: float,
     for c in found:
         text = c.get("syncedLyrics") or ""
         start = first(text)
-        if text in seen or start is None or now is None or abs(start - now) < 1.5 or not lyrics.fits(c, duration) \
-                or backing(start) <= backing(now):
+        if text in seen or start is None or now is None or not lyrics.fits(c, duration):
+            continue
+        if unheard:  # other words are wanted, not the same words timed differently
+            if same_words(raw, text):
+                continue
+        elif abs(start - now) < 1.5 or backing(start) <= backing(now):
             continue
         seen.add(text)
         options.append((abs(start - (now - entry)), c))  # closest to where the singer really starts, first
     best = (abs(entry), None, None, None)
+    best_heard = (timed.get("heard") or {}).get("agree") or 0
     trial = folder / "timing-trial"
-    for _, c in sorted(options, key=lambda o: o[0])[:2]:
+    for _, c in sorted(options, key=lambda o: o[0])[:3 if unheard else 2]:
         trial.mkdir(exist_ok=True)
         (trial / "timed.json").unlink(missing_ok=True)
         text = c["syncedLyrics"]
         lines = await asyncio.to_thread(timed_lyrics, trial, text, stems.path(folder, "vocals"), lyrics.parse_lrc(text), c.get("length"))
-        tried = json.loads((trial / "timed.json").read_text(encoding="utf-8")).get("entry_error")
-        log.info("Lyrics for %s: first line %+.1fs from the singer; LRCLIB %s gives %s", folder.name, entry, c.get("id"), tried)
-        if tried is not None and (abs(tried) < best[0] - 1 or (verdict == "flagged" and abs(tried) <= ENTRY_LIMIT and best[1] is None)):
+        trial_timed = json.loads((trial / "timed.json").read_text(encoding="utf-8"))
+        tried, said = trial_timed.get("entry_error"), trial_timed.get("heard")
+        log.info("Lyrics for %s: first line %+.1fs from the singer; LRCLIB %s gives %s, heard %s", folder.name, entry, c.get("id"), tried, said)
+        if unheard:  # the first record whose words are sung wins; a better one after it still replaces it
+            if said and not heard.failed(said) and said.get("heard", 0) >= heard.MIN_HEARD and (said.get("agree") or 0) > best_heard:
+                best, best_heard = (abs(tried or 0), text, lines, c), said["agree"]
+                (trial / "timed.json").replace(folder / "timed.json")
+        elif not heard.failed(said) and tried is not None and (abs(tried) < best[0] - 1 or (verdict == "flagged" and abs(tried) <= ENTRY_LIMIT and best[1] is None)):
             best = (abs(tried), text, lines, c)
             (trial / "timed.json").replace(folder / "timed.json")
     if trial.exists():
@@ -191,6 +208,12 @@ async def better_timing(folder: Path, raw: str, identity: list, duration: float,
     meta["timings_tried"] = hashlib.sha256(best[1].encode()).hexdigest()[:16] + ":"
     meta.pop("lyric_offset", None)
     return best[1], best[2]
+
+def same_words(a: str, b: str) -> bool:
+    """karaoke-server: two LRC texts with (nearly) the same words, whatever their timing."""
+    import difflib
+    words = lambda raw: [heard.norm(w) for line in lyrics.parse_lrc(raw) for w in line["text"].split() if heard.norm(w)]
+    return difflib.SequenceMatcher(None, words(a), words(b), autojunk=False).ratio() >= 0.9
 
 def sung_without_lyrics(folder: Path, lines: list[dict]) -> list:
     """karaoke-server: timed.json's "uncovered" stretches (lyrics.uncovered), worked out once for songs timed before
@@ -433,6 +456,7 @@ async def run(state, cache: Path):
                            separation_s=round(meta.get("separation_seconds") or 0, 1) if separated else 0,
                            separation_model=meta.get("separation_model", "htdemucs") if separated else "", **timing,
                            lyrics_lines=len(item.get("lyrics") or []), aligned=timed.get("aligned"),
+                           lyrics_heard=(timed.get("heard") or {}).get("agree"),
                            video=item.get("video", False), video_fps=round(youtube.video_fps(video_file)) if video_file.is_file() else 0,
                            video_30=item.get("video_30", False), video_warning=item.get("video_warning", ""),
                            onscreen_lyrics=item.get("onscreen_lyrics", False))

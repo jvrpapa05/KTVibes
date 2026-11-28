@@ -1,4 +1,6 @@
 import asyncio
+import os
+os.environ.setdefault('KTVIBES_LYRICS_CHECK', 'off')  # karaoke-server: no Whisper in unit tests (heard.py)
 import json
 import os
 from pathlib import Path
@@ -1711,3 +1713,97 @@ class SongShiftTests(unittest.TestCase):
 
     def test_no_candidate_means_no_shift_and_no_extra_alignment(self):
         self.assertEqual(self.shift([], {}), 0.0)
+
+
+class HeardTests(unittest.IsolatedAsyncioTestCase):
+    # karaoke-server: are the lyrics the words that are sung? (heard.py; Whisper itself is replaced by a stand-in)
+    def lines(self, texts, start=10.0):
+        out = []
+        for n, text in enumerate(texts):
+            t = start + 5 * n
+            words = text.split()
+            out.append({"t": t, "text": text, "units": [[w + " ", t + 0.5 * k, t + 0.5 * k + 0.4] for k, w in enumerate(words)]})
+        return out
+
+    def said(self, lines, shift=0.0):
+        return [{"w": u[0], "s": u[1] + shift, "e": u[2] + shift} for line in lines for u in line["units"]]
+
+    def test_agreement_counts_lines_whose_words_are_heard_nearby(self):
+        from ktvibes import heard
+        right = self.lines(["you are the sunshine of my life"] * 6 + ["that is why I will always be around"] * 6)
+        self.assertEqual(heard.agreement(right, self.said(right)), {"heard": 12, "agree": 1.0})
+        self.assertEqual(heard.agreement(right, self.said(right, 1.5))["agree"], 1.0)          # a little early or late is timing, not words
+        wrong = self.lines(["nobody knows the trouble that we have seen"] * 12)
+        got = heard.agreement(right, self.said(wrong))
+        self.assertEqual((got["heard"], got["agree"]), (12, 0.0))
+        self.assertTrue(heard.failed(got))
+        self.assertFalse(heard.failed(heard.agreement(right, self.said(right))))
+        self.assertFalse(heard.failed(None))
+        self.assertFalse(heard.failed({"heard": 3, "agree": 0.0}))                                # too little heard: no verdict
+        self.assertEqual(heard.agreement(right, [])["agree"], None)                               # nothing heard at all
+        misheard = [dict(w, w=w["w"].replace("sunshine", "sunshyne")) for w in self.said(right)]
+        self.assertEqual(heard.agreement(right, misheard)["agree"], 1.0)                          # spelling is forgiven
+
+    def test_the_language_is_read_from_the_lyrics(self):
+        from ktvibes import heard
+        english = [{"text": "and I know that you love me when the night is on your side"}] * 4
+        tagalog = [{"text": "ikaw at ako ang pangarap ko sa habang buhay na hindi magbabago"}] * 4
+        self.assertEqual((heard.written(english), heard.written(tagalog)), ("en", "tl"))
+        self.assertIsNone(heard.written([{"text": "la la la"}]))
+        self.assertIsNone(heard.written([{"text": "사랑해요 그대만을 영원히 함께해요"}] * 10))
+
+    def test_check_asks_again_in_another_language_before_failing_and_keeps_the_transcript(self):
+        from ktvibes import heard
+        right = self.lines(["ikaw at ako ang pangarap ko sa buhay"] * 10)
+        other = self.lines(["quelque chose de tout a fait different ici"] * 10)
+        asked = []
+        def transcribe(vocals, languages):
+            asked.extend(languages)
+            return [{"language": l or "fr", "asked": l, "words": self.said(right if l == "tl" else other)} for l in languages]
+        with tempfile.TemporaryDirectory() as folder, unittest.mock.patch.object(heard, "ENABLED", True), \
+                unittest.mock.patch.object(heard, "_transcribe", transcribe):
+            vocals = Path(folder) / "vocals.opus"; vocals.write_bytes(b"x")
+            self.assertEqual(heard.check(vocals, right), {"heard": 10, "agree": 1.0, "language": "tl"})
+            self.assertEqual(asked, ["tl"])                                    # the lyrics are Tagalog: asked as Tagalog, once
+            self.assertEqual(heard.check(vocals, right)["agree"], 1.0)
+            self.assertEqual(asked, ["tl"])                                    # the transcript is kept
+            got = heard.check(vocals, other)                                   # other lyrics for the same song: judged from it
+            self.assertEqual(got["agree"], 1.0)
+            self.assertEqual(asked, ["tl", None])                              # ... after one more listen, in Whisper's own guess
+            wrong = self.lines(["nobody knows the trouble that we have seen"] * 10)
+            self.assertTrue(heard.failed(heard.check(vocals, wrong)))
+            self.assertEqual(asked, ["tl", None, "en"])                        # every language was tried before it failed
+            with unittest.mock.patch.object(heard, "ENABLED", False):
+                self.assertIsNone(heard.check(vocals, wrong))
+            self.assertIsNone(heard.check(vocals, self.lines(["one two three"] * 3)))  # too few lines to judge
+
+    async def test_unheard_lyrics_are_swapped_for_a_record_whose_words_are_sung(self):
+        from ktvibes import worker, lyrics
+        lrc = lambda words: "".join(f"[00:{10 + 5 * n:02d}.00]{words} {n}\n" for n in range(10))
+        wrong, same, right = lrc("nobody knows the trouble"), lrc("nobody knows the trouble").replace("[00:10.00]", "[00:10.50]"), lrc("you are the sunshine")
+        async def candidates(*a, **k):
+            return [{"id": 1, "syncedLyrics": same, "length": 200}, {"id": 2, "syncedLyrics": right, "length": 200}]
+        timed_calls = []
+        def timed(folder, raw, vocals, lines, length=None):
+            timed_calls.append(raw)
+            (folder / "timed.json").write_text(json.dumps({"entry_error": 0.2, "heard": {"heard": 10, "agree": 0.9 if raw == right else 0.0}, "lines": lines}))
+            return lines
+        class NoClient:
+            async def __aenter__(self): raise RuntimeError("offline")
+            async def __aexit__(self, *a): return False
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            (folder / "lyrics.lrc").write_text(wrong)
+            (folder / "vocals.wav").write_bytes(b"")
+            (folder / "timed.json").write_text(json.dumps({"entry_error": 0.1, "heard": {"heard": 10, "agree": 0.0}, "lines": []}))
+            with unittest.mock.patch.object(lyrics, "candidates", candidates), unittest.mock.patch.object(lyrics, "real_lengths", lambda *a: None), \
+                    unittest.mock.patch.object(lyrics, "lrclib", NoClient), unittest.mock.patch.object(worker, "timed_lyrics", timed):
+                meta = {}
+                got = await worker.better_timing(folder, wrong, ["Artist", "Song"], 200, meta)
+                self.assertEqual(got[0], right)
+                self.assertEqual(timed_calls, [right])                         # the same words timed differently were not tried
+                self.assertEqual((folder / "lyrics.lrc").read_text(), right)
+                self.assertEqual(json.loads((folder / "timed.json").read_text())["heard"]["agree"], 0.9)
+                # lyrics whose words are sung are left alone
+                (folder / "timed.json").write_text(json.dumps({"entry_error": 0.1, "heard": {"heard": 10, "agree": 0.8}, "lines": []}))
+                self.assertIsNone(await worker.better_timing(folder, wrong, ["Artist", "Song"], 200, {}))

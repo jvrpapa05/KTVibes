@@ -1,4 +1,6 @@
 """HTTP/WebSocket contract checks, runnable once uv sync installs dependencies."""
+import os
+os.environ.setdefault('KTVIBES_LYRICS_CHECK', 'off')  # karaoke-server: no Whisper in unit tests (heard.py)
 import json
 import asyncio
 import importlib.util
@@ -303,6 +305,12 @@ class APITests(unittest.TestCase):
         song('eeeeeeeeeee', 200, 200, lines=False)    # no lyrics at all
         self.assertEqual([self.main.lines_up(v) for v in ('aaaaaaaaaaa', 'bbbbbbbbbbb', 'ccccccccccc', 'ddddddddddd', 'eeeeeeeeeee')],
                          [True, True, False, True, False])
+        # karaoke-server (heard.py): lyrics whose words are not what is sung don't line up, whatever the lengths say
+        for vid, check in (('fffffffffff', {'heard': 30, 'agree': 0.1}), ('ggggggggggg', {'heard': 30, 'agree': 0.8}), ('hhhhhhhhhhh', {'heard': 3, 'agree': 0.0})):
+            song(vid, 200, 201)
+            path = Path(self.temp.name) / vid / 'timed.json'
+            path.write_text(json.dumps({**json.loads(path.read_text()), 'heard': check}), encoding='utf-8')
+        self.assertEqual([self.main.lines_up(v) for v in ('fffffffffff', 'ggggggggggg', 'hhhhhhhhhhh')], [False, True, True])
 
     def test_search_pages(self):
         with patch.object(self.main.youtube, 'search', return_value=[]) as search, \
